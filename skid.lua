@@ -1,5 +1,5 @@
 -- LootHub ESP + Auto Collect + Auto Collect (No Hop) + ServerHop (with Save Settings)
--- Modified by Request: Added Instant Prompt & Auto Rejoin if No Items in NoHop mode
+-- Modified: Auto Enable 'NoHop' on Startup + Instant Prompt + Auto Rejoin
 
 -- ================== Config ==================
 
@@ -15,6 +15,7 @@ local Workspace = game:GetService("Workspace")
 local HttpService = game:GetService("HttpService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local RunService = game:GetService("RunService")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 -- ================== Helper Functions ==================
 
@@ -24,7 +25,6 @@ end
 
 -- ================== Instant Proximity Prompt ==================
 
--- ใส่ส่วนนี้เพิ่มตามคำขอ เพื่อให้กด Prompt ทันทีไม่ต้องรอ Hold
 task.spawn(function()
     pcall(function()
         SafeGetService("ProximityPromptService").PromptButtonHoldBegan:Connect(function(pp)
@@ -157,11 +157,9 @@ local function getOrCreateContainer()
 end
 
 local function isItemHeldByPlayer(obj)
-    -- Check if item is inside any player's character
     local current = obj
     while current and current ~= Workspace do
         if current:IsA("Model") then
-            -- Check if this model is a player character
             for _, player in pairs(Players:GetPlayers()) do
                 if player.Character == current then
                     return true
@@ -178,7 +176,6 @@ local function createBillboard(part, loot, obj)
     if part.Position.Y > MAX_Y then return end
     if ESPs[part] then return end
     
-    -- Don't create ESP if item is held by a player
     if isItemHeldByPlayer(obj or part) then return end
     
     local container = getOrCreateContainer()
@@ -201,7 +198,6 @@ local function createBillboard(part, loot, obj)
 
     ESPs[part] = bg
     
-    -- Monitor for ancestry changes and player holding
     part.AncestryChanged:Connect(function(_, parent)
         if not part:IsDescendantOf(Workspace) or isItemHeldByPlayer(obj or part) then
             if ESPs[part] then ESPs[part]:Destroy() ESPs[part] = nil end
@@ -271,10 +267,10 @@ local function collectTargetsNoHop()
             if part then
                 itemFound = true
                 -- วาร์ปไปหา
-                LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,3,0)) -- ปรับความสูงลงเล็กน้อยให้ใกล้ Prompt
-                task.wait(0.3) -- ลดเวลา wait ลงเพื่อให้เร็วขึ้น
+                LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,3,0)) 
+                task.wait(0.3)
                 
-                -- หา Prompt และกด
+                -- หา Prompt และกดทันที (ด้วย Instant PP ที่ใส่ไว้ด้านบน)
                 local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
                 if prompt then 
                     fireproximityprompt(prompt) 
@@ -285,7 +281,7 @@ local function collectTargetsNoHop()
     return itemFound
 end
 
--- AutoCollect with ServerHop (Original Logic)
+-- AutoCollect with ServerHop
 task.spawn(function()
     while task.wait(1) do
         if getgenv().AutoCollectEnabled then
@@ -300,7 +296,7 @@ task.spawn(function()
     end
 end)
 
--- AutoCollect without ServerHop (Modified Logic: Auto Hop if Empty)
+-- AutoCollect without ServerHop (Modified: Rejoin if Empty)
 task.spawn(function()
     while task.wait(1.5) do
         if getgenv().AutoCollectNoHopEnabled then
@@ -308,10 +304,8 @@ task.spawn(function()
             
             -- ถ้าไม่เจอของเลย ให้ทำการ Rejoin (Server Hop)
             if not foundSomething then
-                -- ลองเช็คซ้ำอีกทีเพื่อความชัวร์ก่อน Hop
                 task.wait(2)
                 if not collectTargetsNoHop() then
-                     -- แสดงสถานะที่ปุ่ม (ถ้าทำได้) หรือปริ้นท์บอก
                     hopModule:Teleport(game.PlaceId)
                 end
             end
@@ -330,7 +324,7 @@ local function createGUI()
     screen.ResetOnSpawn = false
     screen.Parent = PlayerGui
 
-    -- Main Frame with gradient and rounded corners
+    -- Main Frame
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(0, 240, 0, 210)
     frame.Position = UDim2.new(0, 20, 0.25, 0)
@@ -339,7 +333,6 @@ local function createGUI()
     frame.Active, frame.Draggable = true, true
     frame.Parent = screen
 
-    -- Frame gradient
     local frameGradient = Instance.new("UIGradient")
     frameGradient.Color = ColorSequence.new{
         ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 20, 30)),
@@ -348,18 +341,16 @@ local function createGUI()
     frameGradient.Rotation = 45
     frameGradient.Parent = frame
 
-    -- Frame corner
     local frameCorner = Instance.new("UICorner")
     frameCorner.CornerRadius = UDim.new(0, 12)
     frameCorner.Parent = frame
 
-    -- Frame stroke
     local frameStroke = Instance.new("UIStroke")
     frameStroke.Color = Color3.fromRGB(60, 60, 80)
     frameStroke.Thickness = 2
     frameStroke.Parent = frame
 
-    -- Title with glow effect
+    -- Title
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, -30, 0, 30)
     title.Position = UDim2.new(0, 8, 0, 5)
@@ -372,7 +363,6 @@ local function createGUI()
     title.TextStrokeColor3 = Color3.fromRGB(100, 200, 255)
     title.Parent = frame
 
-    -- Title gradient
     local titleGradient = Instance.new("UIGradient")
     titleGradient.Color = ColorSequence.new{
         ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 200, 255)),
@@ -380,7 +370,7 @@ local function createGUI()
     }
     titleGradient.Parent = title
 
-    -- Close button with hover effect
+    -- Close button
     local closeBtn = Instance.new("TextButton")
     closeBtn.Size = UDim2.new(0, 24, 0, 24)
     closeBtn.Position = UDim2.new(1, -28, 0, 8)
@@ -424,7 +414,6 @@ local function createGUI()
         btnStroke.Thickness = 1
         btnStroke.Parent = btn
 
-        -- Hover effects
         btn.MouseEnter:Connect(function()
             btn.BackgroundColor3 = enabled and Color3.fromRGB(
                 math.min(255, color.R * 255 * 1.2),
@@ -508,7 +497,7 @@ local function createGUI()
         end
     end)
 
-    -- Server Hop Button with special styling
+    -- Server Hop Button
     local hopBtn = Instance.new("TextButton")
     hopBtn.Size = UDim2.new(1, -16, 0, 32)
     hopBtn.Position = UDim2.new(0, 8, 0, 165)
@@ -552,7 +541,7 @@ local function createGUI()
         hopModule:Teleport(game.PlaceId)
     end)
 
-    -- Add shadow effect
+    -- Shadow
     local shadow = Instance.new("Frame")
     shadow.Size = UDim2.new(1, 4, 1, 4)
     shadow.Position = UDim2.new(0, 2, 0, 2)
@@ -570,4 +559,13 @@ end
 -- ================== Init ==================
 
 if getgenv().ESPEnabled then enableESP() end
+
+-- FORCE ENABLE AUTO NOHOP ON STARTUP
+-- เพิ่มส่วนนี้เพื่อให้เปิดออโต้ทันทีเมื่อรันสคริปต์
+task.spawn(function()
+    task.wait(0.5) -- รอโหลดค่าเสร็จนิดหน่อย
+    -- บังคับเปิดทันทีโดยไม่สนค่า Save เก่า
+    setAutoCollectNoHop(true)
+end)
+
 createGUI()
