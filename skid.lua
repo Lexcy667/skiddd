@@ -1,7 +1,6 @@
--- LootHub ESP + Auto Collect + Auto Collect (No Hop) + Super Aggressive ServerHop
--- Modified: ZERO DELAY, SPAM TELEPORT IF NO ITEM
+-- LootHub ESP + Auto Collect + Auto Collect (No Hop) + SPAM HOP (Fixed)
+-- Modified: Fix 'Not Warping' issue & Spam Hop if empty
 
--- รอให้เกมโหลดเสร็จสมบูรณ์ก่อนเริ่มทำงาน
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
@@ -20,7 +19,6 @@ local Workspace = game:GetService("Workspace")
 local HttpService = game:GetService("HttpService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local RunService = game:GetService("RunService")
-local MarketplaceService = game:GetService("MarketplaceService")
 local TeleportService = game:GetService("TeleportService")
 
 -- ================== Helper Functions ==================
@@ -79,7 +77,6 @@ local function loadSettings()
             return
         end
     end
-    -- ถ้าไฟล์ยังไม่มี
     local def = defaultSettings()
     getgenv().ESPEnabled = def.ESP
     getgenv().AutoCollectEnabled = def.AutoCollect
@@ -242,98 +239,99 @@ Workspace.DescendantAdded:Connect(function(desc)
     end
 end)
 
--- ================== Auto Collect (With Server Hop) ==================
+-- ================== Auto Collect Functions ==================
 
-local function collectTargets()
-    local found = false
+-- ฟังก์ชันนี้จะเก็บทีละ 1 ชิ้นแล้ว return true เพื่อไม่ให้วาปรัวจนบัค
+local function collectOneTargetNoHop()
     for _,obj in ipairs(Workspace:GetDescendants()) do
         local loot = findLootCategory(obj)
         if loot and obj:IsA("Model") and not isItemHeldByPlayer(obj) then
             local part = getBasePart(obj)
-            if part then
-                found = true
-                LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,5,0))
-                task.wait(1)
-                local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt then fireproximityprompt(prompt) end
+            -- เช็คเพิ่มว่ามี Prompt จริงไหม
+            local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+            
+            if part and prompt then
+                -- เจอของ! วาปไปเก็บ
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    -- วาปไปที่ของ
+                    LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0, 3, 0))
+                    
+                    -- กด Prompt ทันที
+                    fireproximityprompt(prompt)
+                    
+                    -- หยุด Loop และบอกว่า "เจอของนะ" (จะได้ไม่ไป Hop)
+                    return true 
+                end
             end
         end
     end
-    return found
+    -- ถ้าวนจนครบทุกชิ้นในแมพแล้วไม่เจออะไรเลย -> return false
+    return false
 end
 
--- ================== Auto Collect (No Hop - ZERO DELAY) ==================
-
-local function collectTargetsNoHop()
-    local itemFound = false
-    for _,obj in ipairs(Workspace:GetDescendants()) do
-        local loot = findLootCategory(obj)
-        if loot and obj:IsA("Model") and not isItemHeldByPlayer(obj) then
-            local part = getBasePart(obj)
-            if part then
-                itemFound = true
-                -- วาร์ปไปหาทันที
-                if LocalPlayer.Character then
-                     LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,3,0)) 
-                end
-                
-                -- กด Prompt ทันที ไม่รออะไรทั้งนั้น
-                local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt then 
-                    fireproximityprompt(prompt) 
-                end
-                
-                -- รอเสี้ยววินาทีเพื่อให้เซิฟเวอร์ประมวลผลการเก็บ
-                task.wait(0.1) 
-            end
-        end
-    end
-    return itemFound
-end
-
--- ================== FORCE HOP LOOP (SPAM MODE) ==================
-local function ForceServerHopLoop()
-    -- ฟังก์ชันนี้จะ Spam Teleport แบบรั่วๆ
+local function ForceSpamHop()
+    -- ฟังก์ชัน Hop รัวๆ แบบไม่หยุด
     while true do
         task.spawn(function()
             pcall(function()
                 hopModule:Teleport(game.PlaceId)
             end)
         end)
-        task.wait() -- Spam ทุก Frame (เร็วที่สุดที่เป็นไปได้)
+        task.wait() -- รอเสี้ยววิแล้วยิงคำสั่งใหม่ทันที
     end
 end
 
--- AutoCollect with ServerHop (Normal Mode)
+-- ================== MAIN LOOPS ==================
+
+-- AutoCollect without ServerHop (Main Mode)
 task.spawn(function()
-    while task.wait(1) do
-        if getgenv().AutoCollectEnabled then
-            local relicFound = collectTargets()
-            if not relicFound then
-                task.wait(5)
-                if not collectTargets() then
-                    hopModule:Teleport(game.PlaceId)
-                end
+    while true do
+        if getgenv().AutoCollectNoHopEnabled then
+            -- พยายามเก็บของ 1 ชิ้น
+            local success = collectOneTargetNoHop()
+            
+            if success then
+                -- ถ้าเก็บได้ (เจอของ) ให้รอแป๊บนึงเพื่อให้เซิฟเวอร์ประมวลผลการเก็บ
+                -- ถ้าไม่รอเลย มันจะวาปไปชิ้นต่อไปเร็วเกินจนของเก่าเข้าตัวไม่ทัน
+                task.wait(0.2) 
+            else
+                -- **สำคัญ** ถ้าค้นทั้งแมพแล้วไม่เจออะไรเลย (success = false)
+                -- เข้าสู่โหมด Spam Hop ทันที
+                ForceSpamHop()
+                -- (โค้ดข้างล่างจะไม่ถูกรันเพราะ ForceSpamHop เป็น Loop ตาย)
             end
+        else
+            task.wait(1)
         end
+        -- Loop หลักให้รอนิดหน่อยเพื่อไม่ให้กิน CPU เกินไปตอนไม่ได้เปิดโหมด
+        if not getgenv().AutoCollectNoHopEnabled then task.wait(0.5) else task.wait() end
     end
 end)
 
--- AutoCollect without ServerHop (Modified: SPAM REJOIN IF EMPTY)
+-- AutoCollect with ServerHop (Original Mode - Optional)
 task.spawn(function()
-    while true do -- Loop แบบไม่มี Wait หลัก
-        if getgenv().AutoCollectNoHopEnabled then
-            local foundSomething = collectTargetsNoHop()
-            
-            if not foundSomething then
-                -- ถ้าสแกนแล้วไม่เจอของเลย -> เข้าสู่โหมด Hop รั่วๆ ทันที
-                ForceServerHopLoop()
-            else
-                -- ถ้าเจอของ รอแป๊บนึงแล้ววนหาต่อ
-                task.wait() 
+    while task.wait(1) do
+        if getgenv().AutoCollectEnabled then
+            -- อันนี้เป็นโหมดเก่า (เดินไปเก็บ) ไม่ได้แก้ logic หลัก
+            local found = false
+             for _,obj in ipairs(Workspace:GetDescendants()) do
+                local loot = findLootCategory(obj)
+                if loot and obj:IsA("Model") and not isItemHeldByPlayer(obj) then
+                    local part = getBasePart(obj)
+                    if part then
+                        found = true
+                        LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,5,0))
+                        task.wait(1)
+                        local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if prompt then fireproximityprompt(prompt) end
+                    end
+                end
             end
-        else
-            task.wait(1) 
+            
+            if not found then
+                task.wait(5)
+                hopModule:Teleport(game.PlaceId)
+            end
         end
     end
 end)
@@ -500,7 +498,7 @@ local function createGUI()
         end
     end)
 
-    -- AutoCollect No Hop Toggle (Modified to Rejoin if Empty)
+    -- AutoCollect No Hop Toggle
     local acNoHopBtn = createButton(
         "⚡ Auto NoHop (Spam Hop): " .. (getgenv().AutoCollectNoHopEnabled and "ON" or "OFF"),
         UDim2.new(0, 8, 0, 125),
@@ -562,7 +560,7 @@ local function createGUI()
         hopBtn.Text = "⏳ Hopping..."
         hopBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
         hopBtn.BackgroundColor3 = Color3.fromRGB(200, 150, 50)
-        ForceServerHopLoop() 
+        ForceSpamHop()
     end)
 
     -- Shadow
@@ -591,3 +589,4 @@ task.spawn(function()
 end)
 
 createGUI()
+
