@@ -1,5 +1,5 @@
 -- LootHub ESP + Auto Collect + Auto Collect (No Hop) + ServerHop (with Save Settings)
--- Modified with Instant Proximity Prompt & Auto Rejoin if no items
+-- Modified by Request: Added Instant Prompt & Auto Rejoin if No Items in NoHop mode
 
 -- ================== Config ==================
 
@@ -14,7 +14,24 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Workspace = game:GetService("Workspace")
 local HttpService = game:GetService("HttpService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
-local TeleportService = game:GetService("TeleportService")
+local RunService = game:GetService("RunService")
+
+-- ================== Helper Functions ==================
+
+local function SafeGetService(serviceName)
+    return game:GetService(serviceName)
+end
+
+-- ================== Instant Proximity Prompt ==================
+
+-- ใส่ส่วนนี้เพิ่มตามคำขอ เพื่อให้กด Prompt ทันทีไม่ต้องรอ Hold
+task.spawn(function()
+    pcall(function()
+        SafeGetService("ProximityPromptService").PromptButtonHoldBegan:Connect(function(pp)
+            fireproximityprompt(pp)
+        end)
+    end)
+end)
 
 -- ================== ServerHop ==================
 
@@ -24,10 +41,10 @@ local hopModule = loadstring(game:HttpGet("https://raw.githubusercontent.com/Leo
 
 local LOOTS = {
     {id = "Cosmic Relic",   keywords = {"cosmic relic","cosmicrelic","cosmic"}, color = Color3.fromRGB(0,200,255)},
-    {id = "Enchant Relic",  keywords = {"enchant relic"},                        color = Color3.fromRGB(255,100,255)},
-    {id = "Void Wood",      keywords = {"void wood"},                            color = Color3.fromRGB(160,20,160)},
-    {id = "Lunar Thread",   keywords = {"lunar thread"},                         color = Color3.fromRGB(120,140,255)},
-    {id = "Starfall Totem", keywords = {"starfall totem"},                       color = Color3.fromRGB(255,200,80)},
+    {id = "Enchant Relic",  keywords = {"enchant relic"},                       color = Color3.fromRGB(255,100,255)},
+    {id = "Void Wood",      keywords = {"void wood"},                           color = Color3.fromRGB(160,20,160)},
+    {id = "Lunar Thread",   keywords = {"lunar thread"},                        color = Color3.fromRGB(120,140,255)},
+    {id = "Starfall Totem", keywords = {"starfall totem"},                      color = Color3.fromRGB(255,200,80)},
 }
 
 -- ================== Save / Load ==================
@@ -56,7 +73,7 @@ local function loadSettings()
             return
         end
     end
-    -- kalau file belum ada
+    -- ถ้าไฟล์ยังไม่มี
     local def = defaultSettings()
     getgenv().ESPEnabled = def.ESP
     getgenv().AutoCollectEnabled = def.AutoCollect
@@ -181,7 +198,7 @@ local function createBillboard(part, loot, obj)
     txt.Text = "★ " .. loot.id
     txt.TextColor3 = loot.color
     txt.TextStrokeTransparency = 0.6
-    
+
     ESPs[part] = bg
     
     -- Monitor for ancestry changes and player holding
@@ -223,13 +240,6 @@ Workspace.DescendantAdded:Connect(function(desc)
     end
 end)
 
--- ================== Instant Proximity Prompt Logic ==================
-
--- ฟังก์ชันทำให้ Prompt ทำงานทันทีเมื่อเริ่มกด (Instant PP)
-ProximityPromptService.PromptButtonHoldBegan:Connect(function(pp)
-    fireproximityprompt(pp)
-end)
-
 -- ================== Auto Collect (With Server Hop) ==================
 
 local function collectTargets()
@@ -240,34 +250,31 @@ local function collectTargets()
             local part = getBasePart(obj)
             if part then
                 found = true
-                -- Teleport to item
-                if LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
-                    LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,5,0))
-                end
-                task.wait(0.5) -- ลดเวลาลงเล็กน้อยเพื่อให้ทำงานเร็วขึ้น
-                
+                LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,5,0))
+                task.wait(1)
                 local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt then 
-                    fireproximityprompt(prompt) 
-                end
+                if prompt then fireproximityprompt(prompt) end
             end
         end
     end
     return found
 end
 
--- ================== Auto Collect (No Hop) ==================
+-- ================== Auto Collect (No Hop - Modified) ==================
 
 local function collectTargetsNoHop()
+    local itemFound = false
     for _,obj in ipairs(Workspace:GetDescendants()) do
         local loot = findLootCategory(obj)
         if loot and obj:IsA("Model") and not isItemHeldByPlayer(obj) then
             local part = getBasePart(obj)
             if part then
-                if LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
-                    LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,5,0))
-                end
-                task.wait(0.5)
+                itemFound = true
+                -- วาร์ปไปหา
+                LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,3,0)) -- ปรับความสูงลงเล็กน้อยให้ใกล้ Prompt
+                task.wait(0.3) -- ลดเวลา wait ลงเพื่อให้เร็วขึ้น
+                
+                -- หา Prompt และกด
                 local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
                 if prompt then 
                     fireproximityprompt(prompt) 
@@ -275,50 +282,17 @@ local function collectTargetsNoHop()
             end
         end
     end
+    return itemFound
 end
 
--- ================== Nearby Auto Interact ==================
--- ฟังก์ชันเสริม: กด Prompt อัตโนมัติถ้าเจอของตามสคริปต์อยู่ใกล้ๆ (ไม่ต้อง Teleport)
-
-task.spawn(function()
-    while task.wait(0.1) do
-        if getgenv().AutoCollectEnabled or getgenv().AutoCollectNoHopEnabled then
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                for _, obj in ipairs(Workspace:GetDescendants()) do
-                    if obj:IsA("ProximityPrompt") then
-                        local parentModel = obj.Parent
-                        -- หา Model หลักของไอเทม
-                        while parentModel and not parentModel:IsA("Model") and parentModel ~= Workspace do
-                            parentModel = parentModel.Parent
-                        end
-                        
-                        if parentModel and findLootCategory(parentModel) and not isItemHeldByPlayer(parentModel) then
-                            -- เช็คระยะห่าง ถ้าใกล้กว่า 15 studs ให้กดเลย
-                            if obj.Parent and (obj.Parent.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude < 15 then
-                                fireproximityprompt(obj)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-end)
-
--- ================== Main Loops ==================
-
--- AutoCollect with ServerHop (ถ้าไม่มีของ ให้ Rejoin/Hop)
+-- AutoCollect with ServerHop (Original Logic)
 task.spawn(function()
     while task.wait(1) do
         if getgenv().AutoCollectEnabled then
             local relicFound = collectTargets()
-            
-            -- ถ้าหาของไม่เจอ (No items found)
             if not relicFound then
-                -- รอเช็คอีกครั้งเพื่อความชัวร์ (Wait and check again)
-                task.wait(3) 
+                task.wait(5)
                 if not collectTargets() then
-                    -- ยังไม่เจออีก -> ย้ายเซิร์ฟ (Rejoin/Hop)
                     hopModule:Teleport(game.PlaceId)
                 end
             end
@@ -326,11 +300,21 @@ task.spawn(function()
     end
 end)
 
--- AutoCollect without ServerHop
+-- AutoCollect without ServerHop (Modified Logic: Auto Hop if Empty)
 task.spawn(function()
-    while task.wait(2) do
+    while task.wait(1.5) do
         if getgenv().AutoCollectNoHopEnabled then
-            collectTargetsNoHop()
+            local foundSomething = collectTargetsNoHop()
+            
+            -- ถ้าไม่เจอของเลย ให้ทำการ Rejoin (Server Hop)
+            if not foundSomething then
+                -- ลองเช็คซ้ำอีกทีเพื่อความชัวร์ก่อน Hop
+                task.wait(2)
+                if not collectTargetsNoHop() then
+                     -- แสดงสถานะที่ปุ่ม (ถ้าทำได้) หรือปริ้นท์บอก
+                    hopModule:Teleport(game.PlaceId)
+                end
+            end
         end
     end
 end)
@@ -452,7 +436,7 @@ local function createGUI()
         btn.MouseLeave:Connect(function()
             btn.BackgroundColor3 = enabled and color or Color3.fromRGB(35, 35, 45)
         end)
-        
+
         return btn
     end
 
@@ -502,9 +486,9 @@ local function createGUI()
         end
     end)
 
-    -- AutoCollect No Hop Toggle
+    -- AutoCollect No Hop Toggle (Modified to Rejoin if Empty)
     local acNoHopBtn = createButton(
-        "⚡ Auto NoHop: " .. (getgenv().AutoCollectNoHopEnabled and "ON" or "OFF"),
+        "⚡ Auto NoHop (Rejoin): " .. (getgenv().AutoCollectNoHopEnabled and "ON" or "OFF"),
         UDim2.new(0, 8, 0, 125),
         getgenv().AutoCollectNoHopEnabled and Color3.fromRGB(255, 150, 50) or Color3.fromRGB(35, 35, 45),
         getgenv().AutoCollectNoHopEnabled
@@ -512,12 +496,12 @@ local function createGUI()
     acNoHopBtn.MouseButton1Click:Connect(function()
         setAutoCollectNoHop(not getgenv().AutoCollectNoHopEnabled)
         if getgenv().AutoCollectNoHopEnabled then
-            acNoHopBtn.Text = "⚡ Auto NoHop: ON"
+            acNoHopBtn.Text = "⚡ Auto NoHop (Rejoin): ON"
             acNoHopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             acNoHopBtn.BackgroundColor3 = Color3.fromRGB(255, 150, 50)
             acNoHopBtn.UIStroke.Color = Color3.fromRGB(255, 150, 50)
         else
-            acNoHopBtn.Text = "⚡ Auto NoHop: OFF"
+            acNoHopBtn.Text = "⚡ Auto NoHop (Rejoin): OFF"
             acNoHopBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
             acNoHopBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
             acNoHopBtn.UIStroke.Color = Color3.fromRGB(60, 60, 70)
@@ -555,6 +539,7 @@ local function createGUI()
     hopBtn.MouseEnter:Connect(function()
         hopBtn.BackgroundColor3 = Color3.fromRGB(180, 70, 230)
     end)
+
     hopBtn.MouseLeave:Connect(function()
         hopBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 200)
     end)
