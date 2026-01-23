@@ -1,5 +1,9 @@
 -- LootHub ESP + Auto Collect + Auto Collect (No Hop) + ServerHop (with Save Settings)
--- Modified: Auto Enable 'NoHop' on Startup + Instant Prompt + Auto Rejoin
+-- Modified for JJSploit: Auto Enable 'NoHop' on Startup + Instant Prompt + FAST Rejoin (No Delay)
+
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
 
 -- ================== Config ==================
 
@@ -256,7 +260,7 @@ local function collectTargets()
     return found
 end
 
--- ================== Auto Collect (No Hop - Modified) ==================
+-- ================== Auto Collect (No Hop - Modified FAST) ==================
 
 local function collectTargetsNoHop()
     local itemFound = false
@@ -267,10 +271,12 @@ local function collectTargetsNoHop()
             if part then
                 itemFound = true
                 -- วาร์ปไปหา
-                LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,3,0)) 
-                task.wait(0.3)
+                if LocalPlayer.Character then
+                     LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,3,0)) 
+                end
+                task.wait(0.2) -- ลด Delay การวาร์ปเพื่อให้เก็บเร็วขึ้น
                 
-                -- หา Prompt และกดทันที (ด้วย Instant PP ที่ใส่ไว้ด้านบน)
+                -- หา Prompt และกดทันที
                 local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
                 if prompt then 
                     fireproximityprompt(prompt) 
@@ -281,7 +287,7 @@ local function collectTargetsNoHop()
     return itemFound
 end
 
--- AutoCollect with ServerHop
+-- AutoCollect with ServerHop (Normal Mode)
 task.spawn(function()
     while task.wait(1) do
         if getgenv().AutoCollectEnabled then
@@ -296,19 +302,23 @@ task.spawn(function()
     end
 end)
 
--- AutoCollect without ServerHop (Modified: Rejoin if Empty)
+-- AutoCollect without ServerHop (Modified: INSTANT REJOIN IF EMPTY)
+-- ตรงนี้แก้ให้ไม่รอ ถ้าหาไม่เจอ Hop ทันที
 task.spawn(function()
-    while task.wait(1.5) do
+    while task.wait() do -- ใช้ Loop เร็ว
         if getgenv().AutoCollectNoHopEnabled then
             local foundSomething = collectTargetsNoHop()
             
-            -- ถ้าไม่เจอของเลย ให้ทำการ Rejoin (Server Hop)
+            -- ถ้าไม่เจอของเลย ให้ทำการ Rejoin (Server Hop) ทันที
             if not foundSomething then
-                task.wait(2)
-                if not collectTargetsNoHop() then
-                    hopModule:Teleport(game.PlaceId)
-                end
+                -- ไม่ใส่ task.wait() ตรงนี้ เพื่อให้ Hop ทันทีที่รู้ว่าไม่มีของ
+                hopModule:Teleport(game.PlaceId)
+                task.wait(5) -- กันรันซ้ำระหว่างรอวาป
+            else
+                task.wait(0.5) -- ถ้าเจอของ ให้รอแปปนึงก่อนวนลูปหาชิ้นต่อไป
             end
+        else
+            task.wait(1) -- ถ้าไม่ได้เปิดโหมดนี้ ก็รอปกต
         end
     end
 end)
@@ -356,7 +366,7 @@ local function createGUI()
     title.Position = UDim2.new(0, 8, 0, 5)
     title.BackgroundTransparency = 1
     title.Font = Enum.Font.GothamBold
-    title.Text = "✨ MikirKidsHub Pro"
+    title.Text = "✨ เอาหินหนูไหม Pro MAX v67"
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
     title.TextSize = 18
     title.TextStrokeTransparency = 0.5
@@ -485,12 +495,12 @@ local function createGUI()
     acNoHopBtn.MouseButton1Click:Connect(function()
         setAutoCollectNoHop(not getgenv().AutoCollectNoHopEnabled)
         if getgenv().AutoCollectNoHopEnabled then
-            acNoHopBtn.Text = "⚡ Auto NoHop (Rejoin): ON"
+            acNoHopBtn.Text = "⚡ หาหยก (Rejoin): ON"
             acNoHopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             acNoHopBtn.BackgroundColor3 = Color3.fromRGB(255, 150, 50)
             acNoHopBtn.UIStroke.Color = Color3.fromRGB(255, 150, 50)
         else
-            acNoHopBtn.Text = "⚡ Auto NoHop (Rejoin): OFF"
+            acNoHopBtn.Text = "⚡ หาหยก : ON"
             acNoHopBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
             acNoHopBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
             acNoHopBtn.UIStroke.Color = Color3.fromRGB(60, 60, 70)
@@ -561,10 +571,8 @@ end
 if getgenv().ESPEnabled then enableESP() end
 
 -- FORCE ENABLE AUTO NOHOP ON STARTUP
--- เพิ่มส่วนนี้เพื่อให้เปิดออโต้ทันทีเมื่อรันสคริปต์
 task.spawn(function()
-    task.wait(0.5) -- รอโหลดค่าเสร็จนิดหน่อย
-    -- บังคับเปิดทันทีโดยไม่สนค่า Save เก่า
+    task.wait(0.5)
     setAutoCollectNoHop(true)
 end)
 
