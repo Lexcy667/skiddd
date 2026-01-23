@@ -1,6 +1,7 @@
--- LootHub ESP + Auto Collect + Auto Collect (No Hop) + ServerHop (with Save Settings)
--- Modified for JJSploit: Auto Enable 'NoHop' on Startup + Instant Prompt + FAST Rejoin (No Delay)
+-- LootHub ESP + Auto Collect + Auto Collect (No Hop) + Force ServerHop Loop
+-- Modified: Force Retry Teleport until Success (Infinite Retry)
 
+-- รอให้เกมโหลดเสร็จสมบูรณ์ก่อนเริ่มทำงาน
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
@@ -20,6 +21,7 @@ local HttpService = game:GetService("HttpService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local RunService = game:GetService("RunService")
 local MarketplaceService = game:GetService("MarketplaceService")
+local TeleportService = game:GetService("TeleportService")
 
 -- ================== Helper Functions ==================
 
@@ -37,7 +39,7 @@ task.spawn(function()
     end)
 end)
 
--- ================== ServerHop ==================
+-- ================== ServerHop Module ==================
 
 local hopModule = loadstring(game:HttpGet("https://raw.githubusercontent.com/LeoKholYt/roblox/main/lk_serverhop.lua"))()
 
@@ -274,7 +276,7 @@ local function collectTargetsNoHop()
                 if LocalPlayer.Character then
                      LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,3,0)) 
                 end
-                task.wait(0.2) -- ลด Delay การวาร์ปเพื่อให้เก็บเร็วขึ้น
+                task.wait(0.2) 
                 
                 -- หา Prompt และกดทันที
                 local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
@@ -287,6 +289,19 @@ local function collectTargetsNoHop()
     return itemFound
 end
 
+-- ================== FORCE HOP FUNCTION ==================
+local function ForceServerHopLoop()
+    -- ฟังก์ชันนี้จะวนลูปพยายามย้ายเซิฟจนกว่าจะสำเร็จ
+    -- ถ้ายังอยู่ในเกม มันจะย้ายซ้ำๆ
+    while true do
+        pcall(function()
+            hopModule:Teleport(game.PlaceId)
+        end)
+        -- รอ 6 วินาที ถ้ายังไม่ไป แสดงว่า Hop ล้มเหลว ให้ลองใหม่ทันที
+        task.wait(6)
+    end
+end
+
 -- AutoCollect with ServerHop (Normal Mode)
 task.spawn(function()
     while task.wait(1) do
@@ -295,30 +310,27 @@ task.spawn(function()
             if not relicFound then
                 task.wait(5)
                 if not collectTargets() then
-                    hopModule:Teleport(game.PlaceId)
+                    ForceServerHopLoop()
                 end
             end
         end
     end
 end)
 
--- AutoCollect without ServerHop (Modified: INSTANT REJOIN IF EMPTY)
--- ตรงนี้แก้ให้ไม่รอ ถ้าหาไม่เจอ Hop ทันที
+-- AutoCollect without ServerHop (Modified: FORCE RETRY REJOIN)
 task.spawn(function()
-    while task.wait() do -- ใช้ Loop เร็ว
+    while task.wait() do 
         if getgenv().AutoCollectNoHopEnabled then
             local foundSomething = collectTargetsNoHop()
             
-            -- ถ้าไม่เจอของเลย ให้ทำการ Rejoin (Server Hop) ทันที
             if not foundSomething then
-                -- ไม่ใส่ task.wait() ตรงนี้ เพื่อให้ Hop ทันทีที่รู้ว่าไม่มีของ
-                hopModule:Teleport(game.PlaceId)
-                task.wait(5) -- กันรันซ้ำระหว่างรอวาป
+                -- ถ้าไม่เจอของ ให้เข้าสู่ลูปนรกเพื่อย้ายเซิฟทันที
+                ForceServerHopLoop()
             else
-                task.wait(0.5) -- ถ้าเจอของ ให้รอแปปนึงก่อนวนลูปหาชิ้นต่อไป
+                task.wait(0.5) 
             end
         else
-            task.wait(1) -- ถ้าไม่ได้เปิดโหมดนี้ ก็รอปกต
+            task.wait(1) 
         end
     end
 end)
@@ -366,7 +378,7 @@ local function createGUI()
     title.Position = UDim2.new(0, 8, 0, 5)
     title.BackgroundTransparency = 1
     title.Font = Enum.Font.GothamBold
-    title.Text = "✨ เอาหินหนูไหม Pro MAX v67"
+    title.Text = "✨ MikirKidsHub Pro"
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
     title.TextSize = 18
     title.TextStrokeTransparency = 0.5
@@ -495,12 +507,12 @@ local function createGUI()
     acNoHopBtn.MouseButton1Click:Connect(function()
         setAutoCollectNoHop(not getgenv().AutoCollectNoHopEnabled)
         if getgenv().AutoCollectNoHopEnabled then
-            acNoHopBtn.Text = "⚡ หาหยก (Rejoin): ON"
+            acNoHopBtn.Text = "⚡ Auto NoHop (Rejoin): ON"
             acNoHopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             acNoHopBtn.BackgroundColor3 = Color3.fromRGB(255, 150, 50)
             acNoHopBtn.UIStroke.Color = Color3.fromRGB(255, 150, 50)
         else
-            acNoHopBtn.Text = "⚡ หาหยก : ON"
+            acNoHopBtn.Text = "⚡ Auto NoHop (Rejoin): OFF"
             acNoHopBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
             acNoHopBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
             acNoHopBtn.UIStroke.Color = Color3.fromRGB(60, 60, 70)
@@ -547,8 +559,7 @@ local function createGUI()
         hopBtn.Text = "⏳ Hopping..."
         hopBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
         hopBtn.BackgroundColor3 = Color3.fromRGB(200, 150, 50)
-        task.wait(0.5)
-        hopModule:Teleport(game.PlaceId)
+        ForceServerHopLoop() -- Use force loop on manual click too
     end)
 
     -- Shadow
@@ -577,3 +588,4 @@ task.spawn(function()
 end)
 
 createGUI()
+
