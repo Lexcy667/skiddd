@@ -1,13 +1,13 @@
 --[[
-    LootHub Modified v3:
-    - Title: "เอาหินหนูไหม" (Smaller Font)
-    - Removed: Manual Server Hop Button
+    LootHub Modified v4:
+    - Title: "เอาหินหนูไหม" (Small Font)
+    - Restored: Manual Server Hop Button
     - Logic: Auto Collect toggles are mutually exclusive
 ]]
 
 -- ================== Config ==================
 local MAX_Y = 1183
-local SETTINGS_FILE = "LootHubSettings_v3.json"
+local SETTINGS_FILE = "LootHubSettings_v4.json"
 
 -- ================== Services ==================
 local Players = game:GetService("Players")
@@ -241,10 +241,10 @@ local function createGUI()
 
     -- Main Frame (RED THEME)
     local frame = Instance.new("Frame")
-    -- ปรับความสูงลดลงเล็กน้อยเพราะเอาปุ่มออก 1 ปุ่ม
-    frame.Size = UDim2.new(0, 240, 0, 180)
-    -- POSITION: Left Center
-    frame.Position = UDim2.new(0, 20, 0.5, -90)
+    -- Height increased back to 220 to fit 4 buttons
+    frame.Size = UDim2.new(0, 240, 0, 220)
+    -- POSITION: Left Center (Adjusted Y center)
+    frame.Position = UDim2.new(0, 20, 0.5, -110)
     frame.BackgroundColor3 = Color3.fromRGB(20, 5, 5)
     frame.BorderSizePixel = 0
     frame.Active = true
@@ -275,9 +275,9 @@ local function createGUI()
     title.Position = UDim2.new(0, 10, 0, 0)
     title.BackgroundTransparency = 1
     title.Font = Enum.Font.FredokaOne
-    title.Text = "เอาหินหนูไหม" -- เปลี่ยนชื่อ
+    title.Text = "เอาหินหนูไหม" 
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.TextSize = 18 -- ปรับขนาดเล็กลง
+    title.TextSize = 18 
     title.Parent = frame
     
     -- RGB Stroke for Title
@@ -405,9 +405,15 @@ local function createGUI()
         saveSettings()
     end, getgenv().AutoCollectNoHopEnabled)
 
+    -- 4. Manual Hop (ADDED BACK)
+    makeButton("🌐 ย้ายเซิฟเวอร์ (กดเลย)", function(btn, stroke)
+        btn.Text = "⏳ กำลังย้าย..."
+        hopModule:Teleport(game.PlaceId)
+    end, false)
+
     -- Open Animation
     frame.Size = UDim2.new(0, 0, 0, 0)
-    TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Back), {Size = UDim2.new(0, 240, 0, 180)}):Play()
+    TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Back), {Size = UDim2.new(0, 240, 0, 220)}):Play()
 end
 
 -- ================== Start ==================
