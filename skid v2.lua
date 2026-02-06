@@ -1,13 +1,13 @@
 --[[
-    LootHub Modified:
-    - Position: Left Center
-    - Theme: Red + RGB Stroke Cycle
+    LootHub Modified v3:
+    - Title: "เอาหินหนูไหม" (Smaller Font)
+    - Removed: Manual Server Hop Button
     - Logic: Auto Collect toggles are mutually exclusive
 ]]
 
 -- ================== Config ==================
 local MAX_Y = 1183
-local SETTINGS_FILE = "LootHubSettings_v2.json"
+local SETTINGS_FILE = "LootHubSettings_v3.json"
 
 -- ================== Services ==================
 local Players = game:GetService("Players")
@@ -16,7 +16,6 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Workspace = game:GetService("Workspace")
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
 
 -- ================== ServerHop ==================
 local hopModule = loadstring(game:HttpGet("https://raw.githubusercontent.com/LeoKholYt/roblox/main/lk_serverhop.lua"))()
@@ -51,7 +50,6 @@ local function loadSettings()
         local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
         if ok and type(data) == "table" then
             getgenv().ESPEnabled = data.ESP
-            -- Load Auto states but prefer false if unsure to prevent instant hop loop
             getgenv().AutoCollectEnabled = data.AutoCollect or false
             getgenv().AutoCollectNoHopEnabled = data.AutoCollectNoHop or false
         end
@@ -212,10 +210,9 @@ task.spawn(function()
         if getgenv().AutoCollectEnabled then
             local relicFound = collectTargets()
             if not relicFound then
-                -- No items found, wait a bit then check again or hop
                 task.wait(3)
                 if not collectTargets() then
-                    -- Still nothing? HOP
+                    -- HOP
                     hopModule:Teleport(game.PlaceId)
                 end
             end
@@ -244,9 +241,10 @@ local function createGUI()
 
     -- Main Frame (RED THEME)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 240, 0, 220)
+    -- ปรับความสูงลดลงเล็กน้อยเพราะเอาปุ่มออก 1 ปุ่ม
+    frame.Size = UDim2.new(0, 240, 0, 180)
     -- POSITION: Left Center
-    frame.Position = UDim2.new(0, 20, 0.5, -110)
+    frame.Position = UDim2.new(0, 20, 0.5, -90)
     frame.BackgroundColor3 = Color3.fromRGB(20, 5, 5)
     frame.BorderSizePixel = 0
     frame.Active = true
@@ -277,9 +275,9 @@ local function createGUI()
     title.Position = UDim2.new(0, 10, 0, 0)
     title.BackgroundTransparency = 1
     title.Font = Enum.Font.FredokaOne
-    title.Text = "LOOT HUB (แดง)"
+    title.Text = "เอาหินหนูไหม" -- เปลี่ยนชื่อ
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.TextSize = 22
+    title.TextSize = 18 -- ปรับขนาดเล็กลง
     title.Parent = frame
     
     -- RGB Stroke for Title
@@ -407,15 +405,9 @@ local function createGUI()
         saveSettings()
     end, getgenv().AutoCollectNoHopEnabled)
 
-    -- 4. Manual Hop
-    makeButton("🌐 ย้ายเซิฟเวอร์ (กดเลย)", function(btn, stroke)
-        btn.Text = "⏳ กำลังย้าย..."
-        hopModule:Teleport(game.PlaceId)
-    end, false)
-
     -- Open Animation
     frame.Size = UDim2.new(0, 0, 0, 0)
-    TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Back), {Size = UDim2.new(0, 240, 0, 220)}):Play()
+    TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Back), {Size = UDim2.new(0, 240, 0, 180)}):Play()
 end
 
 -- ================== Start ==================
