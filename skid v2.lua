@@ -1,8 +1,13 @@
--- LootHub ESP + ServerHop Only
--- Modified: Left Side Position + Removed Auto Collect
+--[[
+    LootHub Modified:
+    - Position: Left Center
+    - Theme: Red + RGB Stroke Cycle
+    - Logic: Auto Collect toggles are mutually exclusive
+]]
+
 -- ================== Config ==================
 local MAX_Y = 1183
-local SETTINGS_FILE = "LootHubSettings_Lite.json" -- เปลี่ยนชื่อไฟล์เซฟแยกจากตัวเก่า
+local SETTINGS_FILE = "LootHubSettings_v2.json"
 
 -- ================== Services ==================
 local Players = game:GetService("Players")
@@ -11,6 +16,7 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Workspace = game:GetService("Workspace")
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
 -- ================== ServerHop ==================
 local hopModule = loadstring(game:HttpGet("https://raw.githubusercontent.com/LeoKholYt/roblox/main/lk_serverhop.lua"))()
@@ -24,14 +30,17 @@ local LOOTS = {
     {id = "Starfall Totem", keywords = {"starfall totem"}, color = Color3.fromRGB(255,200,80)},
 }
 
--- ================== Save / Load ==================
-local function defaultSettings()
-    return { ESP = true }
-end
+-- ================== Global State ==================
+getgenv().ESPEnabled = true
+getgenv().AutoCollectEnabled = false       -- Default OFF
+getgenv().AutoCollectNoHopEnabled = false  -- Default OFF
 
+-- ================== Save / Load ==================
 local function saveSettings()
     local data = {
-        ESP = getgenv().ESPEnabled
+        ESP = getgenv().ESPEnabled,
+        AutoCollect = getgenv().AutoCollectEnabled,
+        AutoCollectNoHop = getgenv().AutoCollectNoHopEnabled
     }
     writefile(SETTINGS_FILE, HttpService:JSONEncode(data))
 end
@@ -42,31 +51,24 @@ local function loadSettings()
         local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
         if ok and type(data) == "table" then
             getgenv().ESPEnabled = data.ESP
-            return
+            -- Load Auto states but prefer false if unsure to prevent instant hop loop
+            getgenv().AutoCollectEnabled = data.AutoCollect or false
+            getgenv().AutoCollectNoHopEnabled = data.AutoCollectNoHop or false
         end
     end
-    -- Default
-    local def = defaultSettings()
-    getgenv().ESPEnabled = def.ESP
 end
 loadSettings()
 
-local function setESP(val)
-    getgenv().ESPEnabled = val
-    saveSettings()
-end
-
--- ================== ESP ==================
-local ESPs = {}
-local ContainerName = "LootESP_Container"
-
-local function lower(s) return tostring(s):lower() end
-
-local function containsAny(s, keywords)
-    if not s then return false end
-    s = lower(s)
-    for _,kw in ipairs(keywords) do
-        if string.find(s, lower(kw), 1, true) then return true end
+-- ================== Helper Functions ==================
+local function isItemHeldByPlayer(obj)
+    local current = obj
+    while current and current ~= Workspace do
+        if current:IsA("Model") then
+            for _, player in pairs(Players:GetPlayers()) do
+                if player.Character == current then return true end
+            end
+        end
+        current = current.Parent
     end
     return false
 end
@@ -83,12 +85,26 @@ local function getBasePart(inst)
     return nil
 end
 
+local function lower(s) return tostring(s):lower() end
+local function containsAny(s, keywords)
+    if not s then return false end
+    s = lower(s)
+    for _,kw in ipairs(keywords) do
+        if string.find(s, lower(kw), 1, true) then return true end
+    end
+    return false
+end
+
 local function findLootCategory(inst)
     for _,loot in ipairs(LOOTS) do
         if containsAny(inst.Name, loot.keywords) then return loot end
     end
     return nil
 end
+
+-- ================== ESP System ==================
+local ESPs = {}
+local ContainerName = "LootESP_Container"
 
 local function getOrCreateContainer()
     local c = PlayerGui:FindFirstChild(ContainerName)
@@ -97,19 +113,6 @@ local function getOrCreateContainer()
     c.Name = ContainerName
     c.Parent = PlayerGui
     return c
-end
-
-local function isItemHeldByPlayer(obj)
-    local current = obj
-    while current and current ~= Workspace do
-        if current:IsA("Model") then
-            for _, player in pairs(Players:GetPlayers()) do
-                if player.Character == current then return true end
-            end
-        end
-        current = current.Parent
-    end
-    return false
 end
 
 local function createBillboard(part, loot, obj)
@@ -134,7 +137,8 @@ local function createBillboard(part, loot, obj)
     txt.Font = Enum.Font.SourceSansBold
     txt.Text = "★ " .. loot.id
     txt.TextColor3 = loot.color
-    txt.TextStrokeTransparency = 0.6
+    txt.TextStrokeTransparency = 0.3
+    txt.TextStrokeColor3 = Color3.new(0,0,0)
 
     ESPs[part] = bg
 
@@ -165,8 +169,6 @@ local function disableESP()
         if bg and bg.Parent then bg:Destroy() end
     end
     ESPs = {}
-    local c = PlayerGui:FindFirstChild(ContainerName)
-    if c then c:Destroy() end
 end
 
 Workspace.DescendantAdded:Connect(function(desc)
@@ -179,237 +181,243 @@ Workspace.DescendantAdded:Connect(function(desc)
     end
 end)
 
--- ================== GUI ==================
+-- ================== Auto Collect Logic ==================
+local function collectTargets()
+    local found = false
+    for _,obj in ipairs(Workspace:GetDescendants()) do
+        local loot = findLootCategory(obj)
+        if loot and obj:IsA("Model") and not isItemHeldByPlayer(obj) then
+            local part = getBasePart(obj)
+            if part then
+                found = true
+                if LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
+                    -- Teleport above
+                    LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,5,0))
+                    task.wait(0.5)
+                    local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if prompt then 
+                        fireproximityprompt(prompt)
+                        task.wait(0.5) -- Wait for collect
+                    end
+                end
+            end
+        end
+    end
+    return found
+end
+
+-- Loop: Auto Collect + Server Hop
+task.spawn(function()
+    while task.wait(1.5) do
+        if getgenv().AutoCollectEnabled then
+            local relicFound = collectTargets()
+            if not relicFound then
+                -- No items found, wait a bit then check again or hop
+                task.wait(3)
+                if not collectTargets() then
+                    -- Still nothing? HOP
+                    hopModule:Teleport(game.PlaceId)
+                end
+            end
+        end
+    end
+end)
+
+-- Loop: Auto Collect Only (No Hop)
+task.spawn(function()
+    while task.wait(2) do
+        if getgenv().AutoCollectNoHopEnabled then
+            collectTargets()
+        end
+    end
+end)
+
+-- ================== GUI SYSTEM ==================
 local function createGUI()
-    local old = PlayerGui:FindFirstChild("LootHub_GUI")
+    local old = PlayerGui:FindFirstChild("LootHub_GUI_Red")
     if old then old:Destroy() end
 
     local screen = Instance.new("ScreenGui")
-    screen.Name = "LootHub_GUI"
+    screen.Name = "LootHub_GUI_Red"
     screen.ResetOnSpawn = false
     screen.Parent = PlayerGui
 
-    -- Config Frame Size
-    local frameWidth = 220
-    local frameHeight = 130 -- ลดความสูงลงเพราะปุ่มน้อยลง
-
-    -- Main Frame
+    -- Main Frame (RED THEME)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, frameWidth, 0, frameHeight)
-    
-    -- *** Position: Left Middle ***
-    -- AnchorPoint (0, 0.5) หมายถึงจุดอ้างอิงอยู่ซ้ายกึ่งกลางของเฟรม
-    frame.AnchorPoint = Vector2.new(0, 0.5)
-    -- Position (0, 20, 0.5, 0) หมายถึง ชิดซ้ายห่างออกมา 20px, กึ่งกลางจอเเนวตั้ง
-    frame.Position = UDim2.new(0, 20, 0.5, 0)
-
+    frame.Size = UDim2.new(0, 240, 0, 220)
+    -- POSITION: Left Center
+    frame.Position = UDim2.new(0, 20, 0.5, -110)
     frame.BackgroundColor3 = Color3.fromRGB(20, 5, 5)
     frame.BorderSizePixel = 0
-    frame.Active, frame.Draggable = true, true
+    frame.Active = true
+    frame.Draggable = true
     frame.Parent = screen
+    frame.ClipsDescendants = false
 
-    -- RED Gradient
     local frameGradient = Instance.new("UIGradient")
     frameGradient.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(200, 30, 30)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(40, 0, 0))
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(150, 0, 0)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(30, 0, 0))
     }
     frameGradient.Rotation = 45
     frameGradient.Parent = frame
 
     local frameCorner = Instance.new("UICorner")
-    frameCorner.CornerRadius = UDim.new(0, 12)
+    frameCorner.CornerRadius = UDim.new(0, 10)
     frameCorner.Parent = frame
 
+    -- RGB Stroke for Frame
     local frameStroke = Instance.new("UIStroke")
-    frameStroke.Color = Color3.fromRGB(255, 50, 50)
     frameStroke.Thickness = 2
     frameStroke.Parent = frame
 
     -- Title
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, -30, 0, 30)
-    title.Position = UDim2.new(0, 8, 0, 5)
+    title.Size = UDim2.new(1, -30, 0, 35)
+    title.Position = UDim2.new(0, 10, 0, 0)
     title.BackgroundTransparency = 1
-    title.Font = Enum.Font.GothamBold
-    title.Text = "✨ เอาหินหนูไหม"
+    title.Font = Enum.Font.FredokaOne
+    title.Text = "LOOT HUB (แดง)"
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.TextSize = 18
-    title.TextStrokeTransparency = 0.5
-    title.TextStrokeColor3 = Color3.fromRGB(150, 0, 0)
+    title.TextSize = 22
     title.Parent = frame
+    
+    -- RGB Stroke for Title
+    local titleStroke = Instance.new("UIStroke")
+    titleStroke.Thickness = 1.5
+    titleStroke.Parent = title
 
-    local titleGradient = Instance.new("UIGradient")
-    titleGradient.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 200, 200)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0))
-    }
-    titleGradient.Parent = title
-
-    -- Animations
-    local function openAnim()
-        frame.Size = UDim2.new(0, 0, 0, 0)
-        -- อนิเมชั่นเด้งออกจากซ้าย
-        TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(0, frameWidth, 0, frameHeight)}):Play()
-    end
-
-    local function closeAnim()
-        local tween = TweenService:Create(frame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {Size = UDim2.new(0, 0, 0, 0)})
-        tween:Play()
-        tween.Completed:Connect(function() screen:Destroy() end)
-    end
-
-    local function btnClickAnim(btn)
-        btn.MouseButton1Down:Connect(function()
-             TweenService:Create(btn, TweenInfo.new(0.1), {Size = UDim2.new(1, -20, 0, 28)}):Play()
-        end)
-        btn.MouseButton1Up:Connect(function()
-             TweenService:Create(btn, TweenInfo.new(0.1), {Size = UDim2.new(1, -16, 0, 32)}):Play()
-        end)
-        btn.MouseLeave:Connect(function()
-             TweenService:Create(btn, TweenInfo.new(0.1), {Size = UDim2.new(1, -16, 0, 32)}):Play()
-        end)
-    end
+    -- RGB Cycle Logic
+    task.spawn(function()
+        local h = 0
+        while screen.Parent do
+            h = (h + 0.005) % 1
+            local color = Color3.fromHSV(h, 1, 1)
+            frameStroke.Color = color
+            titleStroke.Color = color
+            task.wait()
+        end
+    end)
 
     -- Close Button
     local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 24, 0, 24)
-    closeBtn.Position = UDim2.new(1, -28, 0, 8)
-    closeBtn.Text = "✕"
+    closeBtn.Size = UDim2.new(0, 25, 0, 25)
+    closeBtn.Position = UDim2.new(1, -30, 0, 5)
+    closeBtn.Text = "X"
     closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 14
     closeBtn.TextColor3 = Color3.fromRGB(255, 200, 200)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
     closeBtn.Parent = frame
-    
-    local closeBtnCorner = Instance.new("UICorner")
-    closeBtnCorner.CornerRadius = UDim.new(0, 6)
-    closeBtnCorner.Parent = closeBtn
-    
-    closeBtn.MouseEnter:Connect(function() closeBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0) end)
-    closeBtn.MouseLeave:Connect(function() closeBtn.BackgroundColor3 = Color3.fromRGB(100, 0, 0) end)
-    closeBtn.MouseButton1Click:Connect(function() closeAnim() end)
+    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+    closeBtn.MouseButton1Click:Connect(function() screen:Destroy() end)
 
-    -- Button Creator Helper
-    local function createButton(text, position, color, enabled)
+    -- Buttons Container
+    local yOffset = 40
+    local function makeButton(text, callback, defaultState)
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(1, -16, 0, 32)
-        -- Adjust position logic for left aligned anchor
-        btn.Position = position
-        btn.AnchorPoint = Vector2.new(0.5, 0)
-        btn.Position = UDim2.new(0.5, 0, position.Y.Scale, position.Y.Offset)
-
+        btn.Size = UDim2.new(1, -20, 0, 35)
+        btn.Position = UDim2.new(0, 10, 0, yOffset)
+        btn.Font = Enum.Font.GothamSemibold
         btn.Text = text
-        btn.Font = Enum.Font.Gotham
-        btn.TextSize = 12
-        btn.TextColor3 = enabled and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(200, 200, 200)
-        btn.BackgroundColor3 = enabled and color or Color3.fromRGB(50, 10, 10)
+        btn.TextSize = 14
+        btn.TextColor3 = Color3.fromRGB(255,255,255)
+        btn.BackgroundColor3 = defaultState and Color3.fromRGB(180, 20, 20) or Color3.fromRGB(40, 40, 40)
         btn.Parent = frame
+        
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 6)
+        corner.Parent = btn
 
-        local btnCorner = Instance.new("UICorner")
-        btnCorner.CornerRadius = UDim.new(0, 8)
-        btnCorner.Parent = btn
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(255, 50, 50)
+        stroke.Thickness = 1
+        stroke.Transparency = defaultState and 0 or 0.7
+        stroke.Parent = btn
 
-        local btnStroke = Instance.new("UIStroke")
-        btnStroke.Color = enabled and color or Color3.fromRGB(80, 20, 20)
-        btnStroke.Thickness = 1
-        btnStroke.Parent = btn
-
-        btnClickAnim(btn)
-
-        btn.MouseEnter:Connect(function()
-            local targetColor = enabled and Color3.fromRGB(math.min(255, color.R*255*1.2), math.min(255, color.G*255*1.2), math.min(255, color.B*255*1.2)) or Color3.fromRGB(70, 20, 20)
-            TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play()
+        -- Click Effect
+        btn.MouseButton1Down:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.1), {Size = UDim2.new(1, -24, 0, 31)}):Play()
+        end)
+        btn.MouseButton1Up:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.1), {Size = UDim2.new(1, -20, 0, 35)}):Play()
         end)
         btn.MouseLeave:Connect(function()
-            local targetColor = enabled and color or Color3.fromRGB(50, 10, 10)
-            TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play()
+            TweenService:Create(btn, TweenInfo.new(0.1), {Size = UDim2.new(1, -20, 0, 35)}):Play()
         end)
 
-        return btn
+        btn.MouseButton1Click:Connect(function()
+            callback(btn, stroke)
+        end)
+
+        yOffset = yOffset + 40
+        return btn, stroke
     end
 
-    local activeColor = Color3.fromRGB(200, 40, 40)
-    local inactiveColor = Color3.fromRGB(50, 10, 10)
-
-    -- ESP Button
-    local espBtn = createButton(
-        "🎯 ESP: " .. (getgenv().ESPEnabled and "เปิด" or "ปิด"),
-        UDim2.new(0, 0, 0, 45),
-        activeColor,
-        getgenv().ESPEnabled
-    )
-    espBtn.MouseButton1Click:Connect(function()
-        setESP(not getgenv().ESPEnabled)
+    -- 1. ESP Toggle
+    makeButton("👁️ ESP: " .. (getgenv().ESPEnabled and "ON" or "OFF"), function(btn, stroke)
+        getgenv().ESPEnabled = not getgenv().ESPEnabled
         local isOn = getgenv().ESPEnabled
+        
+        btn.Text = "👁️ ESP: " .. (isOn and "ON" or "OFF")
+        TweenService:Create(btn, TweenInfo.new(0.3), {BackgroundColor3 = isOn and Color3.fromRGB(180, 20, 20) or Color3.fromRGB(40, 40, 40)}):Play()
+        stroke.Transparency = isOn and 0 or 0.7
+        
         if isOn then enableESP() else disableESP() end
-        espBtn.Text = "🎯 ESP: " .. (isOn and "เปิด" or "ปิด")
-        espBtn.BackgroundColor3 = isOn and activeColor or inactiveColor
-        espBtn.UIStroke.Color = isOn and activeColor or Color3.fromRGB(80, 20, 20)
-    end)
+        saveSettings()
+    end, getgenv().ESPEnabled)
 
-    -- Server Hop Button (ขยับขึ้นมาแทนที่ Auto เดิม)
-    local hopBtn = Instance.new("TextButton")
-    hopBtn.Size = UDim2.new(1, -16, 0, 32)
-    hopBtn.AnchorPoint = Vector2.new(0.5, 0)
-    hopBtn.Position = UDim2.new(0.5, 0, 0, 85) -- Position Y 85
-    
-    hopBtn.Text = "🌐 ย้ายเซิฟเวอร์"
-    hopBtn.Font = Enum.Font.GothamBold
-    hopBtn.TextSize = 12
-    hopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    hopBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-    hopBtn.Parent = frame
+    -- 2. Auto Collect + HOP
+    local btnHop, strokeHop -- Forward declaration
+    local btnNoHop, strokeNoHop -- Forward declaration
 
-    local hopBtnCorner = Instance.new("UICorner")
-    hopBtnCorner.CornerRadius = UDim.new(0, 8)
-    hopBtnCorner.Parent = hopBtn
+    btnHop, strokeHop = makeButton("🚀 ออโต้+ย้ายเซิฟ: " .. (getgenv().AutoCollectEnabled and "ON" or "OFF"), function(btn, stroke)
+        local newState = not getgenv().AutoCollectEnabled
+        getgenv().AutoCollectEnabled = newState
+        
+        -- Disable NoHop if enabling Hop
+        if newState then
+            getgenv().AutoCollectNoHopEnabled = false
+            btnNoHop.Text = "⚡ ออโต้ (ไม่ย้าย): OFF"
+            TweenService:Create(btnNoHop, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(40, 40, 40)}):Play()
+            strokeNoHop.Transparency = 0.7
+        end
 
-    local hopBtnStroke = Instance.new("UIStroke")
-    hopBtnStroke.Color = Color3.fromRGB(255, 50, 50)
-    hopBtnStroke.Thickness = 2
-    hopBtnStroke.Parent = hopBtn
+        btn.Text = "🚀 ออโต้+ย้ายเซิฟ: " .. (newState and "ON" or "OFF")
+        TweenService:Create(btn, TweenInfo.new(0.3), {BackgroundColor3 = newState and Color3.fromRGB(180, 20, 20) or Color3.fromRGB(40, 40, 40)}):Play()
+        stroke.Transparency = newState and 0 or 0.7
+        saveSettings()
+    end, getgenv().AutoCollectEnabled)
 
-    local hopBtnGradient = Instance.new("UIGradient")
-    hopBtnGradient.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 50, 50)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 0, 0))
-    }
-    hopBtnGradient.Rotation = 90
-    hopBtnGradient.Parent = hopBtn
-    
-    btnClickAnim(hopBtn)
+    -- 3. Auto Collect (NO HOP)
+    btnNoHop, strokeNoHop = makeButton("⚡ ออโต้ (ไม่ย้าย): " .. (getgenv().AutoCollectNoHopEnabled and "ON" or "OFF"), function(btn, stroke)
+        local newState = not getgenv().AutoCollectNoHopEnabled
+        getgenv().AutoCollectNoHopEnabled = newState
 
-    hopBtn.MouseEnter:Connect(function()
-        TweenService:Create(hopBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(200, 20, 20)}):Play()
-    end)
-    hopBtn.MouseLeave:Connect(function()
-        TweenService:Create(hopBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(150, 0, 0)}):Play()
-    end)
-    hopBtn.MouseButton1Click:Connect(function()
-        hopBtn.Text = "⏳ กำลังย้าย..."
+        -- Disable Hop if enabling NoHop
+        if newState then
+            getgenv().AutoCollectEnabled = false
+            btnHop.Text = "🚀 ออโต้+ย้ายเซิฟ: OFF"
+            TweenService:Create(btnHop, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(40, 40, 40)}):Play()
+            strokeHop.Transparency = 0.7
+        end
+
+        btn.Text = "⚡ ออโต้ (ไม่ย้าย): " .. (newState and "ON" or "OFF")
+        TweenService:Create(btn, TweenInfo.new(0.3), {BackgroundColor3 = newState and Color3.fromRGB(180, 20, 20) or Color3.fromRGB(40, 40, 40)}):Play()
+        stroke.Transparency = newState and 0 or 0.7
+        saveSettings()
+    end, getgenv().AutoCollectNoHopEnabled)
+
+    -- 4. Manual Hop
+    makeButton("🌐 ย้ายเซิฟเวอร์ (กดเลย)", function(btn, stroke)
+        btn.Text = "⏳ กำลังย้าย..."
         hopModule:Teleport(game.PlaceId)
-    end)
+    end, false)
 
-    -- Shadow
-    local shadow = Instance.new("Frame")
-    shadow.Size = UDim2.new(1, 4, 1, 4)
-    shadow.Position = UDim2.new(0, 2, 0, 2)
-    shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    shadow.BackgroundTransparency = 0.6
-    shadow.BorderSizePixel = 0
-    shadow.ZIndex = frame.ZIndex - 1
-    shadow.Parent = screen
-    local shadowCorner = Instance.new("UICorner")
-    shadowCorner.CornerRadius = UDim.new(0, 12)
-    shadowCorner.Parent = shadow
-    
-    -- Start Animation
-    openAnim()
+    -- Open Animation
+    frame.Size = UDim2.new(0, 0, 0, 0)
+    TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Back), {Size = UDim2.new(0, 240, 0, 220)}):Play()
 end
 
--- ================== Init ==================
-if getgenv().ESPEnabled then
-    enableESP()
-end
+-- ================== Start ==================
+if getgenv().ESPEnabled then enableESP() end
 createGUI()
