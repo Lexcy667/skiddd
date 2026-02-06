@@ -1,8 +1,8 @@
--- LootHub ESP + Auto Collect + Auto Collect (No Hop) + ServerHop
--- Modified: Red Theme + Smooth Animation + Button Click Effect + Thai Language
+-- LootHub ESP + ServerHop Only
+-- Modified: Left Side Position + Removed Auto Collect
 -- ================== Config ==================
 local MAX_Y = 1183
-local SETTINGS_FILE = "LootHubSettings.json"
+local SETTINGS_FILE = "LootHubSettings_Lite.json" -- เปลี่ยนชื่อไฟล์เซฟแยกจากตัวเก่า
 
 -- ================== Services ==================
 local Players = game:GetService("Players")
@@ -26,14 +26,12 @@ local LOOTS = {
 
 -- ================== Save / Load ==================
 local function defaultSettings()
-    return { ESP = true, AutoCollect = false, AutoCollectNoHop = false }
+    return { ESP = true }
 end
 
 local function saveSettings()
     local data = {
-        ESP = getgenv().ESPEnabled,
-        AutoCollect = getgenv().AutoCollectEnabled,
-        AutoCollectNoHop = getgenv().AutoCollectNoHopEnabled
+        ESP = getgenv().ESPEnabled
     }
     writefile(SETTINGS_FILE, HttpService:JSONEncode(data))
 end
@@ -44,42 +42,14 @@ local function loadSettings()
         local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
         if ok and type(data) == "table" then
             getgenv().ESPEnabled = data.ESP
-            getgenv().AutoCollectEnabled = data.AutoCollect
-            getgenv().AutoCollectNoHopEnabled = data.AutoCollectNoHop or false
             return
         end
     end
     -- Default
     local def = defaultSettings()
     getgenv().ESPEnabled = def.ESP
-    getgenv().AutoCollectEnabled = def.AutoCollect
-    getgenv().AutoCollectNoHopEnabled = def.AutoCollectNoHop
 end
 loadSettings()
-
--- ================== Workspace Delta Monitor ==================
-local deltaFolder = Workspace:FindFirstChild("Delta") or Instance.new("Folder", Workspace)
-deltaFolder.Name = "Delta"
-
-local acValue = deltaFolder:FindFirstChild("AutoCollect") or Instance.new("BoolValue", deltaFolder)
-acValue.Name = "AutoCollect"
-acValue.Value = getgenv().AutoCollectEnabled
-
-local acNoHopValue = deltaFolder:FindFirstChild("AutoCollectNoHop") or Instance.new("BoolValue", deltaFolder)
-acNoHopValue.Name = "AutoCollectNoHop"
-acNoHopValue.Value = getgenv().AutoCollectNoHopEnabled
-
-local function setAutoCollect(val)
-    getgenv().AutoCollectEnabled = val
-    acValue.Value = val
-    saveSettings()
-end
-
-local function setAutoCollectNoHop(val)
-    getgenv().AutoCollectNoHopEnabled = val
-    acNoHopValue.Value = val
-    saveSettings()
-end
 
 local function setESP(val)
     getgenv().ESPEnabled = val
@@ -209,65 +179,7 @@ Workspace.DescendantAdded:Connect(function(desc)
     end
 end)
 
--- ================== Auto Collect (With Server Hop) ==================
-local function collectTargets()
-    local found = false
-    for _,obj in ipairs(Workspace:GetDescendants()) do
-        local loot = findLootCategory(obj)
-        if loot and obj:IsA("Model") and not isItemHeldByPlayer(obj) then
-            local part = getBasePart(obj)
-            if part then
-                found = true
-                LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,5,0))
-                task.wait(1)
-                local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt then fireproximityprompt(prompt) end
-            end
-        end
-    end
-    return found
-end
-
--- ================== Auto Collect (No Hop) ==================
-local function collectTargetsNoHop()
-    for _,obj in ipairs(Workspace:GetDescendants()) do
-        local loot = findLootCategory(obj)
-        if loot and obj:IsA("Model") and not isItemHeldByPlayer(obj) then
-            local part = getBasePart(obj)
-            if part then
-                LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,5,0))
-                task.wait(1)
-                local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt then fireproximityprompt(prompt) end
-            end
-        end
-    end
-end
-
--- AutoCollect Loop
-task.spawn(function()
-    while task.wait(1) do
-        if getgenv().AutoCollectEnabled then
-            local relicFound = collectTargets()
-            if not relicFound then
-                task.wait(5)
-                if not collectTargets() then
-                    hopModule:Teleport(game.PlaceId)
-                end
-            end
-        end
-    end
-end)
-
-task.spawn(function()
-    while task.wait(2) do
-        if getgenv().AutoCollectNoHopEnabled then
-            collectTargetsNoHop()
-        end
-    end
-end)
-
--- ================== GUI RED THEME & ANIMATION ==================
+-- ================== GUI ==================
 local function createGUI()
     local old = PlayerGui:FindFirstChild("LootHub_GUI")
     if old then old:Destroy() end
@@ -277,15 +189,24 @@ local function createGUI()
     screen.ResetOnSpawn = false
     screen.Parent = PlayerGui
 
+    -- Config Frame Size
+    local frameWidth = 220
+    local frameHeight = 130 -- ลดความสูงลงเพราะปุ่มน้อยลง
+
     -- Main Frame
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 240, 0, 210)
-    frame.Position = UDim2.new(0.5, -120, 0.5, -105)
+    frame.Size = UDim2.new(0, frameWidth, 0, frameHeight)
+    
+    -- *** Position: Left Middle ***
+    -- AnchorPoint (0, 0.5) หมายถึงจุดอ้างอิงอยู่ซ้ายกึ่งกลางของเฟรม
+    frame.AnchorPoint = Vector2.new(0, 0.5)
+    -- Position (0, 20, 0.5, 0) หมายถึง ชิดซ้ายห่างออกมา 20px, กึ่งกลางจอเเนวตั้ง
+    frame.Position = UDim2.new(0, 20, 0.5, 0)
+
     frame.BackgroundColor3 = Color3.fromRGB(20, 5, 5)
     frame.BorderSizePixel = 0
     frame.Active, frame.Draggable = true, true
     frame.Parent = screen
-    frame.AnchorPoint = Vector2.new(0.5, 0.5) -- For scale animation
 
     -- RED Gradient
     local frameGradient = Instance.new("UIGradient")
@@ -328,7 +249,8 @@ local function createGUI()
     -- Animations
     local function openAnim()
         frame.Size = UDim2.new(0, 0, 0, 0)
-        TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(0, 240, 0, 210)}):Play()
+        -- อนิเมชั่นเด้งออกจากซ้าย
+        TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(0, frameWidth, 0, frameHeight)}):Play()
     end
 
     local function closeAnim()
@@ -338,15 +260,12 @@ local function createGUI()
     end
 
     local function btnClickAnim(btn)
-        -- Click Down (Shrink)
         btn.MouseButton1Down:Connect(function()
              TweenService:Create(btn, TweenInfo.new(0.1), {Size = UDim2.new(1, -20, 0, 28)}):Play()
         end)
-        -- Click Up (Restore)
         btn.MouseButton1Up:Connect(function()
              TweenService:Create(btn, TweenInfo.new(0.1), {Size = UDim2.new(1, -16, 0, 32)}):Play()
         end)
-        -- Reset if mouse leaves while holding
         btn.MouseLeave:Connect(function()
              TweenService:Create(btn, TweenInfo.new(0.1), {Size = UDim2.new(1, -16, 0, 32)}):Play()
         end)
@@ -371,20 +290,21 @@ local function createGUI()
     closeBtn.MouseLeave:Connect(function() closeBtn.BackgroundColor3 = Color3.fromRGB(100, 0, 0) end)
     closeBtn.MouseButton1Click:Connect(function() closeAnim() end)
 
-    -- Button Creator
+    -- Button Creator Helper
     local function createButton(text, position, color, enabled)
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(1, -16, 0, 32)
+        -- Adjust position logic for left aligned anchor
         btn.Position = position
+        btn.AnchorPoint = Vector2.new(0.5, 0)
+        btn.Position = UDim2.new(0.5, 0, position.Y.Scale, position.Y.Offset)
+
         btn.Text = text
         btn.Font = Enum.Font.Gotham
         btn.TextSize = 12
         btn.TextColor3 = enabled and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(200, 200, 200)
         btn.BackgroundColor3 = enabled and color or Color3.fromRGB(50, 10, 10)
         btn.Parent = frame
-        btn.AnchorPoint = Vector2.new(0.5, 0.5)
-        -- Adjust position because of AnchorPoint
-        btn.Position = position + UDim2.new(0.5, -8, 0, 16) 
 
         local btnCorner = Instance.new("UICorner")
         btnCorner.CornerRadius = UDim.new(0, 8)
@@ -395,10 +315,8 @@ local function createGUI()
         btnStroke.Thickness = 1
         btnStroke.Parent = btn
 
-        -- Add Click Animation
         btnClickAnim(btn)
 
-        -- Hover effects
         btn.MouseEnter:Connect(function()
             local targetColor = enabled and Color3.fromRGB(math.min(255, color.R*255*1.2), math.min(255, color.G*255*1.2), math.min(255, color.B*255*1.2)) or Color3.fromRGB(70, 20, 20)
             TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play()
@@ -417,7 +335,7 @@ local function createGUI()
     -- ESP Button
     local espBtn = createButton(
         "🎯 ESP: " .. (getgenv().ESPEnabled and "เปิด" or "ปิด"),
-        UDim2.new(0, 8, 0, 45),
+        UDim2.new(0, 0, 0, 45),
         activeColor,
         getgenv().ESPEnabled
     )
@@ -430,42 +348,11 @@ local function createGUI()
         espBtn.UIStroke.Color = isOn and activeColor or Color3.fromRGB(80, 20, 20)
     end)
 
-    -- Auto Hop Button
-    local acBtn = createButton(
-        "🚀 ออโต้+ย้ายเซิฟ: " .. (getgenv().AutoCollectEnabled and "เปิด" or "ปิด"),
-        UDim2.new(0, 8, 0, 85),
-        activeColor,
-        getgenv().AutoCollectEnabled
-    )
-    acBtn.MouseButton1Click:Connect(function()
-        setAutoCollect(not getgenv().AutoCollectEnabled)
-        local isOn = getgenv().AutoCollectEnabled
-        acBtn.Text = "🚀 ออโต้+ย้ายเซิฟ: " .. (isOn and "เปิด" or "ปิด")
-        acBtn.BackgroundColor3 = isOn and activeColor or inactiveColor
-        acBtn.UIStroke.Color = isOn and activeColor or Color3.fromRGB(80, 20, 20)
-    end)
-
-    -- Auto NoHop Button
-    local acNoHopBtn = createButton(
-        "⚡ ออโต้ (ไม่ย้าย): " .. (getgenv().AutoCollectNoHopEnabled and "เปิด" or "ปิด"),
-        UDim2.new(0, 8, 0, 125),
-        activeColor,
-        getgenv().AutoCollectNoHopEnabled
-    )
-    acNoHopBtn.MouseButton1Click:Connect(function()
-        setAutoCollectNoHop(not getgenv().AutoCollectNoHopEnabled)
-        local isOn = getgenv().AutoCollectNoHopEnabled
-        acNoHopBtn.Text = "⚡ ออโต้ (ไม่ย้าย): " .. (isOn and "เปิด" or "ปิด")
-        acNoHopBtn.BackgroundColor3 = isOn and activeColor or inactiveColor
-        acNoHopBtn.UIStroke.Color = isOn and activeColor or Color3.fromRGB(80, 20, 20)
-    end)
-
-    -- Server Hop Button
+    -- Server Hop Button (ขยับขึ้นมาแทนที่ Auto เดิม)
     local hopBtn = Instance.new("TextButton")
     hopBtn.Size = UDim2.new(1, -16, 0, 32)
-    -- Adjust position for anchor point centering
-    hopBtn.Position = UDim2.new(0, 8, 0, 165) + UDim2.new(0.5, -8, 0, 16)
-    hopBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+    hopBtn.AnchorPoint = Vector2.new(0.5, 0)
+    hopBtn.Position = UDim2.new(0.5, 0, 0, 85) -- Position Y 85
     
     hopBtn.Text = "🌐 ย้ายเซิฟเวอร์"
     hopBtn.Font = Enum.Font.GothamBold
@@ -491,7 +378,6 @@ local function createGUI()
     hopBtnGradient.Rotation = 90
     hopBtnGradient.Parent = hopBtn
     
-    -- Hop Button Animation
     btnClickAnim(hopBtn)
 
     hopBtn.MouseEnter:Connect(function()
