@@ -1,7 +1,7 @@
 -- LootHub ESP + Auto Collect + Auto Collect (No Hop) + ServerHop (with Save Settings)
 -- Modified for Persistence via AutoExec: Auto Enable 'NoHop' on Startup + Instant Prompt + FAST Rejoin
+-- Optimization: Throttled Teleport to prevent spam
 
--- รอให้เกมโหลดเสร็จสมบูรณ์ก่อนเริ่มทำงาน (ป้องกัน Error เวลาเข้าเซิฟใหม่ไวๆ)
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
@@ -10,6 +10,8 @@ end
 
 local MAX_Y = 1183
 local SETTINGS_FILE = "LootHubSettings.json"
+local TELEPORT_DELAY = 0.5 -- ระยะเวลาพักระหว่างการวาร์ปแต่ละจุด (วินาที)
+local LAST_TP_TIME = 0
 
 -- ================== Services ==================
 
@@ -26,6 +28,18 @@ local MarketplaceService = game:GetService("MarketplaceService")
 
 local function SafeGetService(serviceName)
     return game:GetService(serviceName)
+end
+
+local function SafeTeleport(cframe)
+    local now = tick()
+    if now - LAST_TP_TIME >= TELEPORT_DELAY then
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            LocalPlayer.Character:PivotTo(cframe)
+            LAST_TP_TIME = now
+            return true
+        end
+    end
+    return false
 end
 
 -- ================== Instant Proximity Prompt ==================
@@ -78,7 +92,6 @@ local function loadSettings()
             return
         end
     end
-    -- ถ้าไฟล์ยังไม่มี
     local def = defaultSettings()
     getgenv().ESPEnabled = def.ESP
     getgenv().AutoCollectEnabled = def.AutoCollect
@@ -180,7 +193,6 @@ local function createBillboard(part, loot, obj)
     if not part or not part:IsDescendantOf(Workspace) then return end
     if part.Position.Y > MAX_Y then return end
     if ESPs[part] then return end
-    
     if isItemHeldByPlayer(obj or part) then return end
     
     local container = getOrCreateContainer()
@@ -241,7 +253,7 @@ Workspace.DescendantAdded:Connect(function(desc)
     end
 end)
 
--- ================== Auto Collect (With Server Hop) ==================
+-- ================== Auto Collect Core ==================
 
 local function collectTargets()
     local found = false
@@ -251,17 +263,18 @@ local function collectTargets()
             local part = getBasePart(obj)
             if part then
                 found = true
-                LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,5,0))
-                task.wait(1)
-                local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt then fireproximityprompt(prompt) end
+                local success = SafeTeleport(part.CFrame + Vector3.new(0,5,0))
+                if success then
+                    task.wait(0.3)
+                    local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if prompt then fireproximityprompt(prompt) end
+                    task.wait(0.2)
+                end
             end
         end
     end
     return found
 end
-
--- ================== Auto Collect (No Hop - Modified FAST) ==================
 
 local function collectTargetsNoHop()
     local itemFound = false
@@ -271,16 +284,14 @@ local function collectTargetsNoHop()
             local part = getBasePart(obj)
             if part then
                 itemFound = true
-                -- วาร์ปไปหา
-                if LocalPlayer.Character then
-                     LocalPlayer.Character:PivotTo(part.CFrame + Vector3.new(0,3,0)) 
-                end
-                task.wait(0.2) -- ลด Delay การวาร์ปเพื่อให้เก็บเร็วขึ้น
-                
-                -- หา Prompt และกดทันที
-                local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt then 
-                    fireproximityprompt(prompt) 
+                local success = SafeTeleport(part.CFrame + Vector3.new(0,3,0))
+                if success then
+                    task.wait(0.3) 
+                    local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if prompt then 
+                        fireproximityprompt(prompt) 
+                    end
+                    task.wait(0.2)
                 end
             end
         end
@@ -288,13 +299,14 @@ local function collectTargetsNoHop()
     return itemFound
 end
 
--- AutoCollect with ServerHop (Normal Mode)
+-- ================== Loops ==================
+
 task.spawn(function()
     while task.wait(1) do
         if getgenv().AutoCollectEnabled then
             local relicFound = collectTargets()
             if not relicFound then
-                task.wait(5)
+                task.wait(3)
                 if not collectTargets() then
                     hopModule:Teleport(game.PlaceId)
                 end
@@ -303,23 +315,15 @@ task.spawn(function()
     end
 end)
 
--- AutoCollect without ServerHop (Modified: INSTANT REJOIN IF EMPTY)
--- ตรงนี้แก้ให้ไม่รอ ถ้าหาไม่เจอ Hop ทันที
 task.spawn(function()
-    while task.wait() do -- ใช้ Loop เร็ว
+    while task.wait(0.5) do 
         if getgenv().AutoCollectNoHopEnabled then
             local foundSomething = collectTargetsNoHop()
-            
-            -- ถ้าไม่เจอของเลย ให้ทำการ Rejoin (Server Hop) ทันที
             if not foundSomething then
-                -- ไม่ใส่ task.wait() ตรงนี้ เพื่อให้ Hop ทันทีที่รู้ว่าไม่มีของ
+                task.wait(1)
                 hopModule:Teleport(game.PlaceId)
-                task.wait(5) -- กันรันซ้ำระหว่างรอวาป
-            else
-                task.wait(0.5) -- ถ้าเจอของ ให้รอแปปนึงก่อนวนลูปหาชิ้นต่อไป
+                task.wait(10)
             end
-        else
-            task.wait(1) -- ถ้าไม่ได้เปิดโหมดนี้ ก็รอปกต
         end
     end
 end)
@@ -335,7 +339,6 @@ local function createGUI()
     screen.ResetOnSpawn = false
     screen.Parent = PlayerGui
 
-    -- Main Frame
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(0, 240, 0, 210)
     frame.Position = UDim2.new(0, 20, 0.25, 0)
@@ -361,7 +364,6 @@ local function createGUI()
     frameStroke.Thickness = 2
     frameStroke.Parent = frame
 
-    -- Title
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, -30, 0, 30)
     title.Position = UDim2.new(0, 8, 0, 5)
@@ -381,7 +383,6 @@ local function createGUI()
     }
     titleGradient.Parent = title
 
-    -- Close button
     local closeBtn = Instance.new("TextButton")
     closeBtn.Size = UDim2.new(0, 24, 0, 24)
     closeBtn.Position = UDim2.new(1, -28, 0, 8)
@@ -396,15 +397,8 @@ local function createGUI()
     closeBtnCorner.CornerRadius = UDim.new(0, 6)
     closeBtnCorner.Parent = closeBtn
 
-    closeBtn.MouseEnter:Connect(function()
-        closeBtn.BackgroundColor3 = Color3.fromRGB(80, 30, 30)
-    end)
-    closeBtn.MouseLeave:Connect(function()
-        closeBtn.BackgroundColor3 = Color3.fromRGB(50, 25, 25)
-    end)
     closeBtn.MouseButton1Click:Connect(function() screen:Destroy() end)
 
-    -- Button creation function
     local function createButton(text, position, color, enabled)
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(1, -16, 0, 32)
@@ -425,22 +419,9 @@ local function createGUI()
         btnStroke.Thickness = 1
         btnStroke.Parent = btn
 
-        btn.MouseEnter:Connect(function()
-            btn.BackgroundColor3 = enabled and Color3.fromRGB(
-                math.min(255, color.R * 255 * 1.2),
-                math.min(255, color.G * 255 * 1.2),
-                math.min(255, color.B * 255 * 1.2)
-            ) or Color3.fromRGB(50, 50, 60)
-        end)
-        
-        btn.MouseLeave:Connect(function()
-            btn.BackgroundColor3 = enabled and color or Color3.fromRGB(35, 35, 45)
-        end)
-
         return btn
     end
 
-    -- ESP Toggle
     local espBtn = createButton(
         "🎯 ESP: " .. (getgenv().ESPEnabled and "ON" or "OFF"),
         UDim2.new(0, 8, 0, 45),
@@ -452,19 +433,16 @@ local function createGUI()
         if getgenv().ESPEnabled then
             enableESP()
             espBtn.Text = "🎯 ESP: ON"
-            espBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             espBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 255)
             espBtn.UIStroke.Color = Color3.fromRGB(50, 150, 255)
         else
             disableESP()
             espBtn.Text = "🎯 ESP: OFF"
-            espBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
             espBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
             espBtn.UIStroke.Color = Color3.fromRGB(60, 60, 70)
         end
     end)
 
-    -- AutoCollect Toggle (with hop)
     local acBtn = createButton(
         "🚀 Auto+Hop: " .. (getgenv().AutoCollectEnabled and "ON" or "OFF"),
         UDim2.new(0, 8, 0, 85),
@@ -475,18 +453,15 @@ local function createGUI()
         setAutoCollect(not getgenv().AutoCollectEnabled)
         if getgenv().AutoCollectEnabled then
             acBtn.Text = "🚀 Auto+Hop: ON"
-            acBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             acBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
             acBtn.UIStroke.Color = Color3.fromRGB(50, 200, 50)
         else
             acBtn.Text = "🚀 Auto+Hop: OFF"
-            acBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
             acBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
             acBtn.UIStroke.Color = Color3.fromRGB(60, 60, 70)
         end
     end)
 
-    -- AutoCollect No Hop Toggle (Modified to Rejoin if Empty)
     local acNoHopBtn = createButton(
         "⚡ Auto NoHop (Rejoin): " .. (getgenv().AutoCollectNoHopEnabled and "ON" or "OFF"),
         UDim2.new(0, 8, 0, 125),
@@ -497,86 +472,35 @@ local function createGUI()
         setAutoCollectNoHop(not getgenv().AutoCollectNoHopEnabled)
         if getgenv().AutoCollectNoHopEnabled then
             acNoHopBtn.Text = "⚡ Auto NoHop (Rejoin): ON"
-            acNoHopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             acNoHopBtn.BackgroundColor3 = Color3.fromRGB(255, 150, 50)
             acNoHopBtn.UIStroke.Color = Color3.fromRGB(255, 150, 50)
         else
             acNoHopBtn.Text = "⚡ Auto NoHop (Rejoin): OFF"
-            acNoHopBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
             acNoHopBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
             acNoHopBtn.UIStroke.Color = Color3.fromRGB(60, 60, 70)
         end
     end)
 
-    -- Server Hop Button
-    local hopBtn = Instance.new("TextButton")
-    hopBtn.Size = UDim2.new(1, -16, 0, 32)
-    hopBtn.Position = UDim2.new(0, 8, 0, 165)
-    hopBtn.Text = "🌐 Server Hop"
-    hopBtn.Font = Enum.Font.GothamBold
-    hopBtn.TextSize = 12
-    hopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    hopBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 200)
-    hopBtn.Parent = frame
-
-    local hopBtnCorner = Instance.new("UICorner")
-    hopBtnCorner.CornerRadius = UDim.new(0, 8)
-    hopBtnCorner.Parent = hopBtn
-
-    local hopBtnStroke = Instance.new("UIStroke")
-    hopBtnStroke.Color = Color3.fromRGB(200, 100, 255)
-    hopBtnStroke.Thickness = 2
-    hopBtnStroke.Parent = hopBtn
-
-    local hopBtnGradient = Instance.new("UIGradient")
-    hopBtnGradient.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(150, 50, 200)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 30, 150))
-    }
-    hopBtnGradient.Rotation = 45
-    hopBtnGradient.Parent = hopBtn
-
-    hopBtn.MouseEnter:Connect(function()
-        hopBtn.BackgroundColor3 = Color3.fromRGB(180, 70, 230)
-    end)
-
-    hopBtn.MouseLeave:Connect(function()
-        hopBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 200)
-    end)
-    
+    local hopBtn = createButton(
+        "🌐 Server Hop",
+        UDim2.new(0, 8, 0, 165),
+        Color3.fromRGB(150, 50, 200),
+        true
+    )
     hopBtn.MouseButton1Click:Connect(function()
         hopBtn.Text = "⏳ Hopping..."
-        hopBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
-        hopBtn.BackgroundColor3 = Color3.fromRGB(200, 150, 50)
         task.wait(0.5)
         hopModule:Teleport(game.PlaceId)
     end)
-
-    -- Shadow
-    local shadow = Instance.new("Frame")
-    shadow.Size = UDim2.new(1, 4, 1, 4)
-    shadow.Position = UDim2.new(0, 2, 0, 2)
-    shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    shadow.BackgroundTransparency = 0.8
-    shadow.BorderSizePixel = 0
-    shadow.ZIndex = frame.ZIndex - 1
-    shadow.Parent = screen
-
-    local shadowCorner = Instance.new("UICorner")
-    shadowCorner.CornerRadius = UDim.new(0, 12)
-    shadowCorner.Parent = shadow
 end
 
 -- ================== Init ==================
 
 if getgenv().ESPEnabled then enableESP() end
 
--- FORCE ENABLE AUTO NOHOP ON STARTUP
--- โค้ดส่วนนี้จะทำงานทันทีที่รันสคริปต์ (รวมถึงตอน AutoExecute)
 task.spawn(function()
-    task.wait(0.5)
+    task.wait(1)
     setAutoCollectNoHop(true)
 end)
 
 createGUI()
-
