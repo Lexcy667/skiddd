@@ -1,231 +1,290 @@
 --[[
-    🦈 FISCH AUTO - NO UI BUTTONS (PURE AUTO)
-    Optimized for: Auto Collect "Stones/Relics", Bypass Logic
-    Author: Gemini
+    🦈 FISCH / LOOTHUB AUTOMATION - FULL AUTO VERSION
+    Author: Gemini (Optimized for Stability)
+    Features: ESP, Auto Collect, Auto Server Hop (When empty), Anti-Ban
 ]]
 
 repeat task.wait() until game:IsLoaded()
 
--- ================= CONFIG (ตั้งค่าความปลอดภัย) =================
+-- ================= CONFIGURATION =================
 local Config = {
-    MinDelay = 1.1,       -- รอ 1.1 วิ ก่อนเก็บ (กันเด้ง)
-    MaxDelay = 1.6,       -- รอ 1.6 วิ (สุ่ม)
-    ServerHopDelay = 5,   -- ถ้าไม่เจอของ รอ 5 วิ แล้วย้ายห้อง
-    MaxHeight = 1500,     -- ความสูงสูงสุดที่จะสแกนหาของ
+    FileName = "FischLootAuto_V3.json",
+    MinDelay = 1.2,       -- เวลาหน่วงต่ำสุดก่อนวาร์ป (วินาที)
+    MaxDelay = 1.8,       -- เวลาหน่วงสูงสุดก่อนวาร์ป (วินาที)
+    HopDelay = 5,         -- รอสักพักก่อน Hop เพื่อความชัวร์ว่าของหมดจริง
+    MaxHeight = 1200,     -- ความสูงสูงสุดที่จะเก็บ (กันบัคไปแมพอื่น)
+    AutoStart = true      -- เริ่มทำงานทันทีที่รันสคริปต์
 }
 
--- รายชื่อของที่จะเก็บ (หิน/กล่อง/Relic)
-local LootNames = {
-    "Cosmic Relic", 
-    "Enchant Relic", 
-    "Void Wood", 
-    "Lunar Thread", 
-    "Starfall Totem", 
-    "Crate",       -- เผื่อเป็นกล่องทั่วไป
-    "Carbon Crate" -- เผื่อเป็นกล่องคาร์บอน
+-- รายชื่อของที่จะเก็บ (แก้/เพิ่มได้ตรงนี้)
+local LootTable = {
+    {Name = "Cosmic Relic", Color = Color3.fromRGB(0, 255, 255)},
+    {Name = "Enchant Relic", Color = Color3.fromRGB(255, 85, 255)},
+    {Name = "Void Wood", Color = Color3.fromRGB(170, 0, 170)},
+    {Name = "Lunar Thread", Color = Color3.fromRGB(100, 100, 255)},
+    {Name = "Starfall Totem", Color = Color3.fromRGB(255, 215, 0)},
+    -- เพิ่มของอื่นๆ ที่ต้องการได้ที่นี่
 }
 
--- ================= SERVICES =================
+-- ================= VARIABLES =================
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local Workspace = game:GetService("Workspace")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
-local VirtualUser = game:GetService("VirtualUser")
 local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
+local GuiService = game:GetService("GuiService")
 
--- ================= UI CREATION (NO BUTTONS) =================
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-local OldGui = PlayerGui:FindFirstChild("FischAuto_NoBtn")
-if OldGui then OldGui:Destroy() end
+local isFarming = false
+local itemsCollected = 0
 
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FischAuto_NoBtn"
-ScreenGui.Parent = PlayerGui
+-- ================= SETTINGS MANAGER =================
+local Settings = {
+    AutoFarm = true,
+    ESP = true
+}
 
--- Main Background
-local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 250, 0, 110)
-MainFrame.Position = UDim2.new(0.5, -125, 0.85, 0) -- อยู่ด้านล่างกลางจอ
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-MainFrame.BorderSizePixel = 0
-MainFrame.Parent = ScreenGui
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
-
-local UIStroke = Instance.new("UIStroke")
-UIStroke.Parent = MainFrame
-UIStroke.Color = Color3.fromRGB(60, 60, 100)
-UIStroke.Thickness = 2
-
--- Title
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 25)
-Title.BackgroundTransparency = 1
-Title.Text = "🛡️ Mikir Auto - Fully Automated"
-Title.TextColor3 = Color3.fromRGB(0, 255, 150)
-Title.Font = Enum.Font.GothamBlack
-Title.TextSize = 14
-Title.Parent = MainFrame
-
--- Subtitle (Experimental Text)
-local SubTitle = Instance.new("TextLabel")
-SubTitle.Size = UDim2.new(1, 0, 0, 20)
-SubTitle.Position = UDim2.new(0, 0, 0, 22)
-SubTitle.BackgroundTransparency = 1
-SubTitle.Text = "⚠️ เก็บหิน Bypass (ทดลอง)"
-SubTitle.TextColor3 = Color3.fromRGB(255, 180, 50)
-SubTitle.Font = Enum.Font.GothamBold
-SubTitle.TextSize = 12
-SubTitle.Parent = MainFrame
-
--- Status: Current Target
-local TargetLabel = Instance.new("TextLabel")
-TargetLabel.Size = UDim2.new(1, -20, 0, 25)
-TargetLabel.Position = UDim2.new(0, 10, 0, 45)
-TargetLabel.BackgroundTransparency = 1
-TargetLabel.Text = "Target: Scanning..."
-TargetLabel.TextColor3 = Color3.fromRGB(200, 200, 255)
-TargetLabel.TextXAlignment = Enum.TextXAlignment.Left
-TargetLabel.Font = Enum.Font.Gotham
-TargetLabel.TextSize = 13
-TargetLabel.Parent = MainFrame
-
--- Status: Action
-local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(1, -20, 0, 25)
-StatusLabel.Position = UDim2.new(0, 10, 0, 70)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Status: Idle"
-StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatusLabel.Font = Enum.Font.Gotham
-StatusLabel.TextSize = 12
-StatusLabel.Parent = MainFrame
-
--- Auto Run Indicator
-local AutoRunText = Instance.new("TextLabel")
-AutoRunText.Size = UDim2.new(0, 80, 0, 20)
-AutoRunText.Position = UDim2.new(1, -85, 1, -25)
-AutoRunText.BackgroundTransparency = 1
-AutoRunText.Text = "✅ Auto Running"
-AutoRunText.TextColor3 = Color3.fromRGB(100, 255, 100)
-AutoRunText.Font = Enum.Font.GothamBold
-AutoRunText.TextSize = 10
-AutoRunText.Parent = MainFrame
-
--- ================= FUNCTIONS =================
-
-local function SetStatus(target, action)
-    TargetLabel.Text = "Target: " .. (target or "None")
-    StatusLabel.Text = "Status: " .. (action or "Waiting...")
+local function SaveSettings()
+    writefile(Config.FileName, HttpService:JSONEncode(Settings))
 end
 
-local function BypassTeleport(cframe)
-    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        local hrp = LocalPlayer.Character.HumanoidRootPart
-        -- 1. Freeze Velocity (Anti-Fling Bypass)
-        hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
-        hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
-        
-        -- 2. Teleport
-        LocalPlayer.Character:PivotTo(cframe)
-        
-        -- 3. Freeze again
-        hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+local function LoadSettings()
+    if isfile(Config.FileName) then
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(readfile(Config.FileName))
+        end)
+        if success then Settings = result end
+    else
+        SaveSettings()
     end
 end
 
+-- โหลดค่าเดิมทันที
+LoadSettings()
+
+-- ================= ANTI-AFK =================
+LocalPlayer.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
+end)
+
+-- ================= UI (MINIMAL STATUS) =================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FischAutoLoot"
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local StatusFrame = Instance.new("Frame")
+StatusFrame.Size = UDim2.new(0, 200, 0, 90)
+StatusFrame.Position = UDim2.new(0.02, 0, 0.75, 0)
+StatusFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+StatusFrame.BorderSizePixel = 0
+StatusFrame.Parent = ScreenGui
+Instance.new("UICorner", StatusFrame).CornerRadius = UDim.new(0, 8)
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(1, -20, 0, 30)
+StatusLabel.Position = UDim2.new(0, 10, 0, 5)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+StatusLabel.Font = Enum.Font.GothamBold
+StatusLabel.TextSize = 14
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatusLabel.Text = "Status: Idle"
+StatusLabel.Parent = StatusFrame
+
+local ItemLabel = Instance.new("TextLabel")
+ItemLabel.Size = UDim2.new(1, -20, 0, 20)
+ItemLabel.Position = UDim2.new(0, 10, 0, 35)
+ItemLabel.BackgroundTransparency = 1
+ItemLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+ItemLabel.Font = Enum.Font.Gotham
+ItemLabel.TextSize = 12
+ItemLabel.TextXAlignment = Enum.TextXAlignment.Left
+ItemLabel.Text = "Collected: 0"
+ItemLabel.Parent = StatusFrame
+
+local HopButton = Instance.new("TextButton")
+HopButton.Size = UDim2.new(0.9, 0, 0, 25)
+HopButton.Position = UDim2.new(0.05, 0, 0.65, 0)
+HopButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+HopButton.Text = "Force Server Hop"
+HopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+HopButton.Font = Enum.Font.GothamBold
+HopButton.TextSize = 12
+HopButton.Parent = StatusFrame
+Instance.new("UICorner", HopButton).CornerRadius = UDim.new(0, 6)
+
+local function UpdateStatus(text)
+    StatusLabel.Text = "Status: " .. text
+end
+
+-- ================= FUNCTIONS =================
+
+local function SafeTeleport(targetCFrame)
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
+    
+    local hrp = LocalPlayer.Character.HumanoidRootPart
+    
+    -- Reset Velocity (Anti-Fling)
+    hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+    hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
+    
+    -- Random Offset (Human-like)
+    local offset = Vector3.new(math.random(-2,2), 1, math.random(-2,2))
+    LocalPlayer.Character:PivotTo(targetCFrame + offset)
+end
+
 local function ServerHop()
-    SetStatus("None", "Server Empty -> Hopping...")
-    task.wait(2)
+    UpdateStatus("Hopping Server...")
+    SaveSettings() -- Save before leaving
     
-    local PlaceID = game.PlaceId
-    local AllIDs = {}
-    local found = false
-    
-    pcall(function()
-        local Site = game.HttpService:JSONDecode(game:HttpGet('https://games.roblox.com/v1/games/' .. PlaceID .. '/servers/Public?sortOrder=Asc&limit=100'))
-        for i, v in pairs(Site.data) do
-            if v.playing ~= v.maxPlayers then
-                table.insert(AllIDs, v.id)
+    -- Method 1: API Hop (Find lowest player count)
+    local success, err = pcall(function()
+        local servers = HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100"))
+        for _, server in pairs(servers.data) do
+            if server.playing < server.maxPlayers - 2 and server.id ~= game.JobId then
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, server.id, LocalPlayer)
+                return
             end
         end
     end)
     
-    if #AllIDs > 0 then
-        TeleportService:TeleportToPlaceInstance(PlaceID, AllIDs[math.random(1, #AllIDs)], LocalPlayer)
-    else
-        SetStatus("None", "Hop Failed -> Rejoining...")
-        TeleportService:Teleport(PlaceID, LocalPlayer)
+    -- Method 2: Fallback (Random Rejoin)
+    if not success then
+        UpdateStatus("API Failed, Rejoining...")
+        TeleportService:Teleport(game.PlaceId, LocalPlayer)
     end
 end
 
-local function CheckLoot()
-    local FoundItems = {}
+HopButton.MouseButton1Click:Connect(ServerHop)
+
+-- ================= LOGIC CORE =================
+
+local function IsLoot(model)
+    if not model then return nil end
+    local name = model.Name:lower()
+    for _, loot in pairs(LootTable) do
+        if string.find(name, loot.Name:lower()) then
+            return loot
+        end
+    end
+    return nil
+end
+
+local function GetLootItems()
+    local items = {}
     for _, v in pairs(Workspace:GetDescendants()) do
-        if v:IsA("Model") or v:IsA("BasePart") then
-            for _, name in pairs(LootNames) do
-                if string.find(v.Name, name) then
-                    local prompt = v:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    if prompt then
-                        table.insert(FoundItems, {Obj = v, Prompt = prompt})
+        if v:IsA("BasePart") or v:IsA("Model") then
+            -- เช็คว่ามี ProximityPrompt หรือไม่
+            if v:FindFirstChildWhichIsA("ProximityPrompt", true) then
+                local lootData = IsLoot(v)
+                if lootData then
+                    local part = v:IsA("Model") and v.PrimaryPart or v
+                    if part and part.Position.Y < Config.MaxHeight then
+                        table.insert(items, {Part = part, Data = lootData, Prompt = v:FindFirstChildWhichIsA("ProximityPrompt", true)})
                     end
                 end
             end
         end
     end
-    return FoundItems
+    return items
 end
 
--- ================= ANTI-AFK =================
-LocalPlayer.Idled:Connect(function()
-    VirtualUser:Button2Down(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
-    task.wait(1)
-    VirtualUser:Button2Up(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
+-- Main Loop
+task.spawn(function()
+    while true do
+        if Settings.AutoFarm then
+            local loots = GetLootItems()
+            
+            if #loots > 0 then
+                UpdateStatus("Found " .. #loots .. " items")
+                
+                for _, item in pairs(loots) do
+                    if not Settings.AutoFarm then break end
+                    if item.Part and item.Part.Parent and item.Prompt then
+                        
+                        -- 1. Teleport
+                        UpdateStatus("Going to: " .. item.Data.Name)
+                        SafeTeleport(item.Part.CFrame)
+                        
+                        -- 2. Wait (Safety Delay)
+                        task.wait(math.random(Config.MinDelay * 10, Config.MaxDelay * 10) / 10)
+                        
+                        -- 3. Collect
+                        if item.Prompt.Parent then
+                            fireproximityprompt(item.Prompt)
+                            itemsCollected = itemsCollected + 1
+                            ItemLabel.Text = "Collected: " .. itemsCollected
+                            
+                            -- Create simple effect
+                            local hl = Instance.new("Highlight")
+                            hl.FillColor = item.Data.Color
+                            hl.OutlineColor = Color3.new(1,1,1)
+                            hl.Parent = item.Part
+                            game:GetService("Debris"):AddItem(hl, 1)
+                        end
+                        
+                        -- 4. Post-Collect Delay
+                        task.wait(0.5)
+                    end
+                end
+                
+                -- Clear items and check again
+                UpdateStatus("Checking for respawns...")
+                task.wait(2)
+            else
+                -- No items found -> Server Hop
+                UpdateStatus("No items found!")
+                task.wait(2)
+                
+                -- Double check before hopping
+                local checkAgain = GetLootItems()
+                if #checkAgain == 0 then
+                    UpdateStatus("Server Empty -> Hopping in " .. Config.HopDelay .. "s")
+                    task.wait(Config.HopDelay)
+                    ServerHop()
+                end
+            end
+        end
+        task.wait(1)
+    end
 end)
 
--- ================= MAIN LOOP (AUTO RUN) =================
-
+-- ================= ESP =================
 task.spawn(function()
-    while task.wait(0.5) do
-        local Items = CheckLoot()
-        
-        if #Items > 0 then
-            for _, item in pairs(Items) do
-                if item.Obj and item.Obj.Parent and item.Prompt.Parent then
-                    local Part = (item.Obj:IsA("Model") and item.Obj.PrimaryPart) or item.Obj
+    local ESP_Folder = Instance.new("Folder", ScreenGui)
+    ESP_Folder.Name = "ESP_Items"
+
+    while true do
+        if Settings.ESP then
+            ESP_Folder:ClearAllChildren()
+            local items = GetLootItems()
+            
+            for _, item in pairs(items) do
+                if item.Part then
+                    local bg = Instance.new("BillboardGui")
+                    bg.Adornee = item.Part
+                    bg.Size = UDim2.new(0, 100, 0, 40)
+                    bg.AlwaysOnTop = true
+                    bg.Parent = ESP_Folder
                     
-                    if Part and Part.Position.Y < Config.MaxHeight then
-                        -- Update UI
-                        SetStatus(item.Obj.Name, "Teleporting...")
-                        
-                        -- Teleport Step
-                        BypassTeleport(Part.CFrame + Vector3.new(0, 3.5, 0))
-                        
-                        -- Wait Step (Randomized)
-                        local delayTime = math.random(Config.MinDelay * 10, Config.MaxDelay * 10) / 10
-                        SetStatus(item.Obj.Name, "Wait: " .. delayTime .. "s")
-                        task.wait(delayTime)
-                        
-                        -- Collect Step
-                        if item.Prompt.Parent then
-                            SetStatus(item.Obj.Name, "Collecting...")
-                            fireproximityprompt(item.Prompt)
-                            task.wait(0.8) -- รอของเข้ากระเป๋า
-                        end
-                    end
+                    local txt = Instance.new("TextLabel", bg)
+                    txt.Size = UDim2.new(1, 0, 1, 0)
+                    txt.BackgroundTransparency = 1
+                    txt.TextColor3 = item.Data.Color
+                    txt.TextStrokeTransparency = 0
+                    txt.Font = Enum.Font.GothamBold
+                    txt.TextSize = 12
+                    txt.Text = item.Data.Name .. "\n[" .. math.floor((LocalPlayer.Character.HumanoidRootPart.Position - item.Part.Position).Magnitude) .. "m]"
                 end
             end
         else
-            -- No Items Found
-            SetStatus("None", "Map Empty -> Waiting " .. Config.ServerHopDelay .. "s")
-            task.wait(Config.ServerHopDelay)
-            
-            -- Check one last time before hop
-            if #CheckLoot() == 0 then
-                ServerHop()
-            end
+            ESP_Folder:ClearAllChildren()
         end
+        task.wait(1.5) -- Update ESP every 1.5s (Save CPU)
     end
 end)
+
+UpdateStatus("Script Loaded & Auto Running")
 
